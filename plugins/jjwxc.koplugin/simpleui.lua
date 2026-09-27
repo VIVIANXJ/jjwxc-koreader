@@ -177,6 +177,16 @@ function M:register(plugin)
                 local p=currentPlugin(); if p then p:onJJWXCGenerateEpub() end
             end,
         },
+        {
+            id = "jjwxc_open_epub",
+            label = "打开晋江离线 EPUB",
+            icon = plugin_icon,
+            is_in_place = true,
+            is_async_in_place = true,
+            execute = function()
+                local p=currentPlugin(); if p then p:onJJWXCOpenEpub() end
+            end,
+        },
     }
 
     local ok, err = pcall(function()

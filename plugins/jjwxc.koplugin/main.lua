@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.35"
+local PLUGIN_VERSION = "0.4.36"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -162,6 +162,9 @@ function JJ:onDispatcherRegisterActions()
     Dispatcher:registerAction("jjwxc_generate_epub", {
         category="none", event="JJWXCGenerateEpub", title="晋江：生成/更新离线 EPUB", reader=true,
     })
+    Dispatcher:registerAction("jjwxc_open_epub", {
+        category="none", event="JJWXCOpenEpub", title="晋江：打开本书离线 EPUB", reader=true,
+    })
 end
 
 function JJ:onJJWXCShowShelf()
@@ -218,6 +221,13 @@ function JJ:onJJWXCGenerateEpub()
     self:generateOfflineEpub(ctx.novel_id,ctx.book,ctx.author,false)
     return true
 end
+
+function JJ:onJJWXCOpenEpub()
+    local ctx=self:getCurrentChapterContext()
+    if not ctx then msg("请先打开本书的晋江在线 HTML。") return true end
+    self:openOfflineEpub(ctx.novel_id,ctx.book)
+    return true
+end
 function JJ:save()
     self.settings:saveSetting("token",self.token)
     self.settings:saveSetting("account",self.account)
@@ -253,6 +263,13 @@ function JJ:addToMainMenu(menu_items)
             {text="☰  当前小说目录",callback=function()
                 if self:backendReady() then self:onJJWXCShowToc() end
             end, enabled_func=function() return self:getCurrentChapterContext()~=nil end},
+            {text="▣  打开本书离线 EPUB",callback=function()
+                local c=self:getCurrentChapterContext()
+                if c then self:openOfflineEpub(c.novel_id,c.book) end
+            end, enabled_func=function()
+                local c=self:getCurrentChapterContext()
+                return c and lfs.attributes(self:offlineEpubPath(c.novel_id,c.book),"mode")=="file"
+            end},
             {text="⬇  下载本书全部可读章节",callback=function()
                 if self:backendReady() then self:downloadCurrentNovel() end
             end, enabled_func=function() return self:getCurrentChapterContext()~=nil and self.token~="" end},
@@ -671,9 +688,14 @@ function JJ:showNovel(novel_id)
         local items={}
         local pr=self.progress[tostring(novel_id)]
         if pr and pr.chapter_id then
-            items[#items+1]={text="▶ 继续阅读  ·  "..tostring(pr.chapter_title or ("第"..pr.chapter_id.."章")),callback=function() UIManager:close(menu); self:openChapter(tostring(novel_id),tostring(pr.chapter_id),title,tostring(pr.chapter_title or "继续阅读"),author) end}
+            items[#items+1]={text="▶ 打开在线 HTML  ·  "..tostring(pr.chapter_title or ("第"..pr.chapter_id.."章")),callback=function() UIManager:close(menu); self:openChapter(tostring(novel_id),tostring(pr.chapter_id),title,tostring(pr.chapter_title or "继续阅读"),author) end}
         end
         items[#items+1]={text="☰ 章节目录",callback=function() UIManager:close(menu); self:showChapters(novel_id,title,author) end}
+        items[#items+1]={text="▣ 打开离线 EPUB",callback=function()
+            UIManager:close(menu); self:openOfflineEpub(novel_id,title)
+        end, enabled_func=function()
+            return lfs.attributes(self:offlineEpubPath(novel_id,title),"mode")=="file"
+        end}
         items[#items+1]={text="⬇ 下载全部免费章和已购章",callback=function()
             UIManager:close(menu); self:downloadNovel(novel_id,title,author)
         end, enabled_func=function() return self.token~="" end}
@@ -692,12 +714,9 @@ end
 
 function JJ:showChapters(novel_id,novel_title,author,direct_open,current_chapter_id)
     if not self:backendReady() then return end
-    self:runOnline(function()
-        msg("加载章节目录…",1)
-        local chapters,err=self.client:getChapterList(novel_id)
-        if not chapters then msg("目录读取失败："..tostring(err)); return end
+    local manifest=self:loadOfflineManifest(novel_id,novel_title)
+    local function display_chapters(chapters,offline)
         self.chapter_lists[tostring(novel_id)]=chapters
-        local manifest=self:loadOfflineManifest(novel_id,novel_title)
         local states=manifest and manifest.states or {}
         local items={}
         local menu
@@ -724,9 +743,30 @@ function JJ:showChapters(novel_id,novel_title,author,direct_open,current_chapter
                     end}
             end
         end
-        menu=Menu:new{title=novel_title.." · 目录",item_table=items,items_per_page=14,
+        menu=Menu:new{title=novel_title..(offline and " · 离线目录" or " · 目录"),item_table=items,items_per_page=14,
             close_callback=function() UIManager:close(menu) end}
         UIManager:show(menu)
+    end
+    local online=not NetworkMgr.isOnline or NetworkMgr:isOnline()
+    if not online then
+        if manifest and type(manifest.chapters)=="table" then
+            display_chapters(manifest.chapters,true)
+        else
+            msg("当前没有网络，也没有已保存的整本目录。请联网刷新一次或先下载整本正文。")
+        end
+        return
+    end
+    self:runOnline(function()
+        msg("加载章节目录…",1)
+        local chapters,err=self.client:getChapterList(novel_id)
+        if chapters then
+            display_chapters(chapters,false)
+        elseif manifest and type(manifest.chapters)=="table" then
+            msg("在线目录读取失败，改用已保存目录。",2)
+            display_chapters(manifest.chapters,true)
+        else
+            msg("目录读取失败："..tostring(err))
+        end
     end)
 end
 
@@ -780,6 +820,17 @@ end
 
 function JJ:offlineEpubPath(novel_id,novel_title)
     return self:bookDir(novel_id,novel_title).."/"..safe_name(novel_title).."_离线版.epub"
+end
+
+function JJ:openOfflineEpub(novel_id,novel_title)
+    local path=self:offlineEpubPath(novel_id,novel_title)
+    if lfs.attributes(path,"mode")~="file" then
+        msg("这本书还没有离线 EPUB。\n\n请先选择“下载本书全部可读章节”或“生成 / 更新离线 EPUB”。")
+        return
+    end
+    if self.ui and self.ui.document then self.ui:switchDocument(path)
+    elseif self.ui then self.ui:openFile(path)
+    else msg("无法从当前界面打开 EPUB，请在书库的 JJWXC 文件夹中打开。") end
 end
 
 function JJ:generateOfflineEpub(novel_id,novel_title,author,quiet)
@@ -1914,7 +1965,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.35
+    msg([[JJWXC for KOReader v0.4.36
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -1956,6 +2007,7 @@ function JJ:showHelp()
 • v0.4.33 修正整本段评首章长时间显示“准备中”的误导状态；启动后立即显示第一章及耗时提示。
 • v0.4.34 已缓存段评会写入离线 EPUB；正文后的数字使用 EPUB 脚注链接，轻点可在 KOReader 中弹窗查看。整本段评完成后自动更新同一个 EPUB。
 • v0.4.35 移除会与 KOReader 页面 Show 事件冲突的兼容入口；翻到章节末尾后不再误触发“同步晋江书架”。延迟的旧章节迁移与跳首页动作也会核对当前文件，避免 HTML 与 EPUB 互相拉回。
+• v0.4.36 菜单可直接打开本书离线 EPUB；在线 HTML 入口标识更清楚；断网或在线目录失败时自动使用整本下载保存的离线目录。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
