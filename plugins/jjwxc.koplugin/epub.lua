@@ -95,8 +95,10 @@ function E.build(path,meta,chapters)
                     ..tostring(paragraph_id)..' 段 · '..tostring(#comments)..' 条段评</h2>'
                     ..'<div class="quote"><strong>原文</strong><br/>「'..esc(line)..'」</div>'
                     ..table.concat(rows,"\n")..'</aside>'
-                manifest[#manifest+1]='<item id="n'..i..'-'..paragraph_id..'" href="'..note_name
+                local note_manifest_id='n'..i..'-'..paragraph_id
+                manifest[#manifest+1]='<item id="'..note_manifest_id..'" href="'..note_name
                     ..'" media-type="application/xhtml+xml"/>'
+                spine[#spine+1]='<itemref idref="'..note_manifest_id..'" linear="no"/>'
                 files[#files+1]={"OEBPS/"..note_name,'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN"><head><title>'
                     ..esc(ch.title)..' · 第 '..tostring(paragraph_id)..' 段评</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>'
                     ..note_html..'</body></html>'}

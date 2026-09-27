@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.45"
+local PLUGIN_VERSION = "0.4.46"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -976,6 +976,12 @@ function JJ:generateOfflineEpub(novel_id,novel_title,author,quiet)
     end
     local ok_ds,ds=pcall(function() return DocSettings:open(path) end)
     if ok_ds and ds then
+        local old_cache=ds:readSetting("cache_file_path")
+        if type(old_cache)=="string" and old_cache~="" and old_cache~=path then
+            pcall(function() os.remove(old_cache) end)
+        end
+        ds:delSetting("cache_file_path")
+        ds:delSetting("partial_md5_checksum")
         local props=ds:readSetting("doc_props") or {}
         props.title=tostring(novel_title).."（离线版）"
         props.display_title=props.title
@@ -2217,7 +2223,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.45
+    msg([[JJWXC for KOReader v0.4.46
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2269,6 +2275,7 @@ function JJ:showHelp()
 • v0.4.43 新增“从缓存重建本章段评标记”及匹配统计；EPUB 每个段落的段评使用独立 XHTML，避免一次弹出全章所有段评。
 • v0.4.44 段评下载兼容数组、数字键对象与多层嵌套索引，以及更多计数字段；异常 0 条结果不再覆盖缓存。
 • v0.4.45 网页段评接口返回1004时自动改用App登录接口，并只保留能递归提取段落编号或按引用原文匹配的评论，避免混入普通章评。
+• v0.4.46 EPUB 独立段评文件加入非线性 spine，使 KOReader 将其识别为内部脚注目标；重建时清除旧排版缓存。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
