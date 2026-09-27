@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.37"
+local PLUGIN_VERSION = "0.4.38"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1985,7 +1985,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.37
+    msg([[JJWXC for KOReader v0.4.38
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2029,6 +2029,7 @@ function JJ:showHelp()
 • v0.4.35 移除会与 KOReader 页面 Show 事件冲突的兼容入口；翻到章节末尾后不再误触发“同步晋江书架”。延迟的旧章节迁移与跳首页动作也会核对当前文件，避免 HTML 与 EPUB 互相拉回。
 • v0.4.36 菜单可直接打开本书离线 EPUB；在线 HTML 入口标识更清楚；断网或在线目录失败时自动使用整本下载保存的离线目录。
 • v0.4.37 换章会在关闭旧文档后清除 last_xpointer，并在打开完成后立即跳到第一页；切章期间拦截重复的章节末尾事件。取消打开章节时自动下载整章段评，避免网络请求造成翻页卡顿。
+• v0.4.38 离线 EPUB 段评补充标准 role/epub:type 与 CREngine 脚注提示，并扩大数字点击区域，减少点空后被当作普通翻页。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

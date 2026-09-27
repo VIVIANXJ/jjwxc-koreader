@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.4.38
+
+- 为 EPUB 段评链接加入标准 `role="doc-noteref"` 和 CREngine `noteref` 提示。
+- 为段评内容加入标准脚注角色和 CREngine `footnote` 提示。
+- 扩大段评数字的点击区域，减少点击落空后触发普通翻页。
+
 ## 0.4.37
 
 - 换章时清除稳定 HTML 的旧 `last_xpointer`，打开完成后立即跳到第一页。
