@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.34"
+local PLUGIN_VERSION = "0.4.35"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -167,12 +167,6 @@ end
 function JJ:onJJWXCShowShelf()
     if self:backendReady() then self:showShelf() end
     return true
-end
-
--- Simple UI's Plugin picker looks for a conventional onShow/show/open method.
--- Keep this tiny alias so JJWXC is discoverable there on old and new releases.
-function JJ:onShow()
-    return self:onJJWXCShowShelf()
 end
 
 function JJ:onJJWXCShowToc()
@@ -515,10 +509,11 @@ function JJ:ensureStableBookCover(file, cover_url, book_dir)
     end
 end
 
-function JJ:forceChapterStart()
+function JJ:forceChapterStart(expected_file)
     for _,delay in ipairs({0.05,0.25,0.8}) do
         UIManager:scheduleIn(delay,function()
-            if self.ui then
+            local current=self.ui and self.ui.document and self.ui.document.file or nil
+            if self.ui and (not expected_file or current==expected_file) then
                 pcall(function() self.ui:handleEvent(Event:new("GotoPage",1)) end)
             end
         end)
@@ -1300,7 +1295,7 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
         else
             self.ui:openFile(file)
         end
-        self:forceChapterStart()
+        self:forceChapterStart(file)
 
         -- KOReader may update history again during ReaderUI init; clean once more afterwards.
         for _,delay in ipairs({0.4,1.3,3.0}) do
@@ -1449,8 +1444,11 @@ function JJ:onReaderReady()
         local pr=self.progress[tostring(nid)]
         if pr and pr.chapter_id then
             UIManager:scheduleIn(0.15,function()
-                self:openChapter(nid,tostring(pr.chapter_id),book~="" and book or "晋江小说",
-                    tostring(pr.chapter_title or ("第"..pr.chapter_id.."章")),author)
+                local current=self.ui and self.ui.document and self.ui.document.file or nil
+                if current==file then
+                    self:openChapter(nid,tostring(pr.chapter_id),book~="" and book or "晋江小说",
+                        tostring(pr.chapter_title or ("第"..pr.chapter_id.."章")),author)
+                end
             end)
         end
         return
@@ -1461,7 +1459,10 @@ function JJ:onReaderReady()
         if file~=stable then
             -- 这是旧版本遗留的“单章文件”：自动迁移到固定整本书文件。
             UIManager:scheduleIn(0.15,function()
-                self:openChapter(nid,cid,book,ctitle~="" and ctitle or ("第"..cid.."章"),author)
+                local current=self.ui and self.ui.document and self.ui.document.file or nil
+                if current==file then
+                    self:openChapter(nid,cid,book,ctitle~="" and ctitle or ("第"..cid.."章"),author)
+                end
             end)
         else
             local current_ctx=self:getCurrentChapterContext()
@@ -1913,7 +1914,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.34
+    msg([[JJWXC for KOReader v0.4.35
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -1954,6 +1955,7 @@ function JJ:showHelp()
 • v0.4.32 将整本正文与整本段评拆成两个独立下载任务；段评任务只处理已经缓存成功的正文，支持暂停、继续、停止，并自动跳过已有段评缓存。
 • v0.4.33 修正整本段评首章长时间显示“准备中”的误导状态；启动后立即显示第一章及耗时提示。
 • v0.4.34 已缓存段评会写入离线 EPUB；正文后的数字使用 EPUB 脚注链接，轻点可在 KOReader 中弹窗查看。整本段评完成后自动更新同一个 EPUB。
+• v0.4.35 移除会与 KOReader 页面 Show 事件冲突的兼容入口；翻到章节末尾后不再误触发“同步晋江书架”。延迟的旧章节迁移与跳首页动作也会核对当前文件，避免 HTML 与 EPUB 互相拉回。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
