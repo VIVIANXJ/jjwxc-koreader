@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.39"
+local PLUGIN_VERSION = "0.4.40"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1118,6 +1118,17 @@ function JJ:downloadCurrentNovelComments()
     self:downloadNovelComments(ctx.novel_id,ctx.book,ctx.author)
 end
 
+local function is_temporary_network_error(err)
+    local s=tostring(err or ""):lower()
+    return s:find("host or service not provided",1,true)
+        or s:find("name or service not known",1,true)
+        or s:find("could not resolve",1,true)
+        or s:find("network is unreachable",1,true)
+        or s:find("connection timed out",1,true)
+        or s:find("timeout",1,true)
+        or s:find("temporary failure",1,true)
+end
+
 function JJ:downloadNovelCommentsStep(task)
     if task.finished or task.paused or task.running then return end
     if task.done>=task.total then
@@ -1134,6 +1145,7 @@ function JJ:downloadNovelCommentsStep(task)
         return
     end
     task.running=true
+    local advance=true
     local c=task.chapters[task.done+1]
     local id=tostring(c.chapterid or c.chapterId or c.id)
     local title=tostring(c.chaptername or c.chapterName or c.name or id)
@@ -1177,11 +1189,24 @@ function JJ:downloadNovelCommentsStep(task)
             task.cached=task.cached+1
             task.comments_total=task.comments_total+(result.total or 0)
         else
-            task.failed=task.failed+1
             task.last_error=tostring(type(result)=="table" and result.error or "后台下载失败")
+            if is_temporary_network_error(task.last_error) then
+                -- Do not burn through the rest of the book while DNS/Wi-Fi is
+                -- unavailable. Keep the current index so Continue retries it.
+                advance=false
+                task.paused=true
+                task.current_title=title.." · 网络错误，已暂停；联网后点继续"
+            else
+                task.failed=task.failed+1
+            end
         end
     end
-    task.done=task.done+1; task.running=false
+    if advance then task.done=task.done+1 end
+    task.running=false
+    if task.paused then
+        self:showDownloadProgress(task)
+        return
+    end
     if task.done%5==0 or task.done>=task.total then self:showDownloadProgress(task) end
     if not task.paused then UIManager:scheduleIn(0.15,function() self:downloadNovelCommentsStep(task) end) end
 end
@@ -2062,7 +2087,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.39
+    msg([[JJWXC for KOReader v0.4.40
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2108,6 +2133,7 @@ function JJ:showHelp()
 • v0.4.37 换章会在关闭旧文档后清除 last_xpointer，并在打开完成后立即跳到第一页；切章期间拦截重复的章节末尾事件。取消打开章节时自动下载整章段评，避免网络请求造成翻页卡顿。
 • v0.4.38 离线 EPUB 段评补充标准 role/epub:type 与 CREngine 脚注提示，并扩大数字点击区域，减少点空后被当作普通翻页。
 • v0.4.39 下载本章段评后会原地刷新并保留当前页；在 HTML 第一页继续向前翻会进入上一章末页。
+• v0.4.40 整本段评遇到 DNS、断网或超时会停在当前章并自动暂停；联网后点继续即可重试，不再连续制造失败记录。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
