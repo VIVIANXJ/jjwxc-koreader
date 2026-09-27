@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.41"
+local PLUGIN_VERSION = "0.4.42"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -850,6 +850,30 @@ function JJ:offlineEpubPath(novel_id,novel_title)
     return self:bookDir(novel_id,novel_title).."/"..safe_name(novel_title).."_离线版.epub"
 end
 
+function JJ:groupParagraphComments(comment_cache,paragraphs)
+    local counts,groups={},{ }
+    if type(comment_cache)~="table" then return counts,groups end
+    -- Re-run the original-text matcher whenever a document is generated.
+    -- Server paragraph_id values are not guaranteed to equal our rendered
+    -- 1..N paragraph numbers; matchParagraphComments updates _jj_pid in-place.
+    if self.client and self.client.matchParagraphComments and type(paragraphs)=="table" then
+        pcall(function() self.client:matchParagraphComments(comment_cache,paragraphs) end)
+    end
+    local root=type(comment_cache.data)=="table" and comment_cache.data or comment_cache
+    local rows=root.commentList or root.commentlist or root.list or {}
+    if type(rows)=="table" then
+        for _,row in ipairs(rows) do
+            local pid=tonumber(row._jj_pid or row.paragraph_id or row.paragraphId or row.paragraphid)
+            if pid and paragraphs and paragraphs[pid] then
+                counts[pid]=(counts[pid] or 0)+1
+                groups[pid]=groups[pid] or {}
+                groups[pid][#groups[pid]+1]=row
+            end
+        end
+    end
+    return counts,groups
+end
+
 function JJ:openOfflineEpub(novel_id,novel_title)
     local path=self:offlineEpubPath(novel_id,novel_title)
     if lfs.attributes(path,"mode")~="file" then
@@ -881,23 +905,12 @@ function JJ:generateOfflineEpub(novel_id,novel_title,author,quiet)
                 local data=self:loadChapterCache(novel_id,novel_title,id)
                 if data then
                     local title=c.chaptername or c.chapterName or c.name or ("第 "..id.." 章")
-                    local comments_by_paragraph={}
+                    local paragraphs=Html.paragraph_lines(data.content or data.chapterContent or "")
                     local comment_cache=self:loadParagraphChapterCache(novel_id,id)
-                    local comment_root=type(comment_cache)=="table"
-                        and (type(comment_cache.data)=="table" and comment_cache.data or comment_cache) or {}
-                    local comment_rows=comment_root.commentList or comment_root.commentlist or comment_root.list or {}
-                    if type(comment_rows)=="table" then
-                        for _,row in ipairs(comment_rows) do
-                            local pid=tonumber(row._jj_pid or row.paragraph_id or row.paragraphId or row.paragraphid)
-                            if pid then
-                                comments_by_paragraph[pid]=comments_by_paragraph[pid] or {}
-                                comments_by_paragraph[pid][#comments_by_paragraph[pid]+1]=row
-                            end
-                        end
-                    end
+                    local _,comments_by_paragraph=self:groupParagraphComments(comment_cache,paragraphs)
                     chapters[#chapters+1]={
                         title=tostring(title),
-                        paragraphs=Html.paragraph_lines(data.content or data.chapterContent or ""),
+                        paragraphs=paragraphs,
                         comments=comments_by_paragraph,
                         say=data.sayBodyV2 or data.sayBody or data.authorSay or "",
                     }
@@ -1386,17 +1399,9 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
         -- Never block chapter opening on comment endpoints. Use the offline
         -- chapter-comment cache when available; manual comment downloads can
         -- refresh it without making every page turn wait on the network.
-        local paragraph_counts={}
+        local paragraph_texts=Html.paragraph_lines(data.content or data.chapterContent or "")
         local comment_cache=self:loadParagraphChapterCache(novel_id,chapter_id)
-        local comment_root=type(comment_cache)=="table"
-            and (type(comment_cache.data)=="table" and comment_cache.data or comment_cache) or {}
-        local comment_rows=comment_root.commentList or comment_root.commentlist or comment_root.list or {}
-        if type(comment_rows)=="table" then
-            for _,row in ipairs(comment_rows) do
-                local pid=tonumber(row._jj_pid or row.paragraph_id or row.paragraphId or row.paragraphid)
-                if pid then paragraph_counts[pid]=(paragraph_counts[pid] or 0)+1 end
-            end
-        end
+        local paragraph_counts=self:groupParagraphComments(comment_cache,paragraph_texts)
 
         -- 关键改动：每本晋江小说始终只使用一个固定 HTML 文件。
         -- 换章时覆盖同一个文件，KOReader/Simple UI 因而只会看到“一本书”。
@@ -1656,6 +1661,21 @@ function JJ:onReaderReady()
             end)
         else
             local current_ctx=self:getCurrentChapterContext()
+            local comment_renderer=raw:match('<meta name="jjwxc%-comment%-renderer" content="([^"]*)">')
+            if comment_renderer~="2" and current_ctx
+                    and self:loadParagraphChapterCache(nid,cid) then
+                local body=self:loadChapterCache(nid,book,cid)
+                if body then
+                    UIManager:scheduleIn(0.15,function()
+                        local still=self:getCurrentChapterContext()
+                        if still and still.file==file and tostring(still.chapter_id)==tostring(cid) then
+                            self:renderChapterData(nid,cid,book,ctitle~="" and ctitle or ("第"..cid.."章"),
+                                author,body,true,true,false)
+                        end
+                    end)
+                    return
+                end
+            end
             self:applyReaderBookMetadata(current_ctx)
             self:installParagraphTapHandler()
             self:installTocHandler()
@@ -2106,7 +2126,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.41
+    msg([[JJWXC for KOReader v0.4.42
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2154,6 +2174,7 @@ function JJ:showHelp()
 • v0.4.39 下载本章段评后会原地刷新并保留当前页；在 HTML 第一页继续向前翻会进入上一章末页。
 • v0.4.40 整本段评遇到 DNS、断网或超时会停在当前章并自动暂停；联网后点继续即可重试，不再连续制造失败记录。
 • v0.4.41 整本段评完成后立即刷新当前 HTML；EPUB 脚注内容从正文排版中隐藏，只在轻点数字时作为弹窗目标显示。
+• v0.4.42 HTML 与 EPUB 生成时按段评引用原文重新匹配渲染段落；已有缓存无需重下。EPUB 弹窗采用与 HTML 相同的原文、作者、时间、赞数、正文和回复排版。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

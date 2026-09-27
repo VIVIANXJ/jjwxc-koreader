@@ -347,16 +347,21 @@ function Client:matchParagraphComments(data, paragraphs)
         local pid=tonumber(row.paragraph_id or row.paragraphId or row.paragraphid)
         local quote=comment_quote(row)
         if quote~="" then quoted=quoted+1 end
-        if not pid or pid<=0 or not paragraphs[pid] then
-            local best,best_score=nil,0
-            if quote~="" then
-                for i,text in ipairs(paragraphs) do
-                    local score=similarity(quote,text)
-                    if score>best_score then best,best_score=i,score end
-                    if score==1 then break end
-                end
+        local best,best_score=nil,0
+        if quote~="" then
+            for i,text in ipairs(paragraphs) do
+                local score=similarity(quote,text)
+                if score>best_score then best,best_score=i,score end
+                if score==1 then break end
             end
-            if best and best_score>=0.52 then pid=best end
+        end
+        -- Prefer a strong original-text match even when the server supplied a
+        -- numeric paragraph_id: that id may belong to JJWXC's source DOM and
+        -- need not equal the rendered HTML paragraph number.
+        if best and best_score>=0.52 then
+            pid=best
+        elseif not pid or pid<=0 or not paragraphs[pid] then
+            pid=nil
         end
         if pid and pid>0 and paragraphs[pid] then
             row._jj_pid=pid
@@ -445,7 +450,7 @@ function Client:getParagraphSwitchDiagnostic(novel_id)
         .."&novelid="..urlencode(novel_id)
         .."&setting_type=author_paragraph_comment_switch"
     return self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.41",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id),
         ["Accept-Encoding"]="identity",
     }})
@@ -458,7 +463,7 @@ function Client:getParagraphCommentSummaryDiagnostic(novel_id, chapter_id)
     local endpoint="https://www.jjwxc.net/app.jjwxc/Pc/comment/getNovelParagraphCommentNum"
     local params="novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
     local headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.41",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
     }
@@ -477,7 +482,7 @@ function Client:getParagraphComments(novel_id, chapter_id, paragraph_id, sort_mo
         .."&paragraph_id="..urlencode(paragraph_id)
         .."&offset="..tostring(offset).."&limit="..tostring(limit)
     local data,err=self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.41",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
     }})

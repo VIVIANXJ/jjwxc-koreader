@@ -35,7 +35,7 @@ function H.chapter(title, content, saybody, meta)
     local sub={}
     if meta.book then sub[#sub+1]=esc(meta.book) end
     if meta.author then sub[#sub+1]=esc(meta.author) end
-    local metas=string.format('<meta name="author" content="%s"><meta name="jjwxc-novel-id" content="%s"><meta name="jjwxc-chapter-id" content="%s"><meta name="jjwxc-book" content="%s"><meta name="jjwxc-author" content="%s"><meta name="jjwxc-chapter-title" content="%s"><meta name="jjwxc-prev-id" content="%s"><meta name="jjwxc-prev-title" content="%s"><meta name="jjwxc-next-id" content="%s"><meta name="jjwxc-next-title" content="%s">',esc(meta.author or ""),esc(meta.novel_id or ""),esc(meta.chapter_id or ""),esc(meta.book or ""),esc(meta.author or ""),esc(title or ""),esc(meta.prev_id or ""),esc(meta.prev_title or ""),esc(meta.next_id or ""),esc(meta.next_title or ""))
+    local metas=string.format('<meta name="author" content="%s"><meta name="jjwxc-novel-id" content="%s"><meta name="jjwxc-chapter-id" content="%s"><meta name="jjwxc-book" content="%s"><meta name="jjwxc-author" content="%s"><meta name="jjwxc-chapter-title" content="%s"><meta name="jjwxc-prev-id" content="%s"><meta name="jjwxc-prev-title" content="%s"><meta name="jjwxc-next-id" content="%s"><meta name="jjwxc-next-title" content="%s"><meta name="jjwxc-comment-renderer" content="2">',esc(meta.author or ""),esc(meta.novel_id or ""),esc(meta.chapter_id or ""),esc(meta.book or ""),esc(meta.author or ""),esc(title or ""),esc(meta.prev_id or ""),esc(meta.prev_title or ""),esc(meta.next_id or ""),esc(meta.next_title or ""))
     -- Keep the document title stable across chapter replacements. KOReader
     -- uses <title> for home/history metadata, while the visible h1 remains
     -- the current chapter title.
