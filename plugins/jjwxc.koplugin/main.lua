@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.47"
+local PLUGIN_VERSION = "0.4.48"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1019,6 +1019,7 @@ function JJ:showDownloadProgress(task)
     if task.kind=="comments" then
         counters="段评已缓存 "..task.cached.."  ·  失败 "..task.failed
             .."  ·  评论 "..task.comments_total.." 条"
+            ..((task.empty_retried or 0)>0 and ("\n空缓存重新下载 "..tostring(task.empty_retried).." 章") or "")
     else
         counters="已缓存 "..task.readable.."  ·  明确未购 "..task.skipped.."  ·  失败 "..task.failed
     end
@@ -1193,6 +1194,7 @@ function JJ:downloadNovelCommentsStep(task)
         self.download_task=nil
         local done_text="整本段评下载完成。\n\n已缓存章节："..task.cached
             .."\n评论总数："..task.comments_total
+            .."\n重新下载空缓存："..tostring(task.empty_retried or 0)
             .."\n失败章节："..task.failed
             ..(task.last_error and ("\n最近错误："..tostring(task.last_error):sub(1,180)) or "")
             ..(epub_path and ("\n离线 EPUB：已写入段评（"..tostring(epub_count).." 章）")
@@ -1226,11 +1228,12 @@ function JJ:downloadNovelCommentsStep(task)
     task.current_title=title.." · 下载段评"
     if not task.dialog then self:showDownloadProgress(task) end
     local existing=self:loadParagraphChapterCache(task.novel_id,id)
-    if existing then
-        local root=type(existing.data)=="table" and existing.data or existing
+    local existing_count=self:paragraphCacheCommentCount(existing)
+    if existing and existing_count>0 then
         task.cached=task.cached+1
-        task.comments_total=task.comments_total+(tonumber(root.commentTotal or 0) or 0)
+        task.comments_total=task.comments_total+existing_count
     else
+        if existing then task.empty_retried=(task.empty_retried or 0)+1 end
         local chapter_body=self:loadChapterCache(task.novel_id,task.novel_title,id)
         local ctx={novel_id=task.novel_id,chapter_id=id,title=title,
             paragraphs=chapter_body and Html.paragraph_lines(chapter_body.content or chapter_body.chapterContent or "") or {}}
@@ -1313,7 +1316,7 @@ function JJ:downloadNovelComments(novel_id,novel_title,author)
         local first_title=tostring(first.chaptername or first.chapterName or first.name
             or first.chapterid or first.chapterId or first.id or "第 1 章")
         local task={kind="comments",novel_id=novel_id,novel_title=novel_title,author=author,
-            chapters=clean,total=#clean,done=0,cached=0,failed=0,comments_total=0,
+            chapters=clean,total=#clean,done=0,cached=0,failed=0,comments_total=0,empty_retried=0,
             paused=false,running=false,finished=false,
             current_title="第 1 / "..tostring(#clean).." 章："..first_title
                 .."\n正在读取本章全部段评；评论多时可能需要数分钟，可点暂停。"}
@@ -1907,6 +1910,18 @@ function JJ:loadParagraphChapterCache(novel_id,chapter_id)
     return type(wrapper.data)=="table" and wrapper.data or wrapper
 end
 
+function JJ:paragraphCacheCommentCount(cache)
+    if type(cache)~="table" then return 0 end
+    local root=type(cache.data)=="table" and cache.data or cache
+    local rows=root.commentList or root.commentlist or root.comments or root.comment_list or root.list
+    local row_count=0
+    if type(rows)=="table" then
+        for _,row in pairs(rows) do if type(row)=="table" then row_count=row_count+1 end end
+    end
+    local reported=tonumber(root.commentTotal or root.commenttotal or root.total or 0) or 0
+    return math.max(row_count,reported)
+end
+
 function JJ:saveParagraphChapterCache(ctx,data)
     local file=self:paragraphCacheFile(ctx.novel_id,ctx.chapter_id,true)
     if not file then return nil,"无法创建段评缓存目录" end
@@ -2247,7 +2262,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.47
+    msg([[JJWXC for KOReader v0.4.48
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2301,6 +2316,7 @@ function JJ:showHelp()
 • v0.4.45 网页段评接口返回1004时自动改用App登录接口，并只保留能递归提取段落编号或按引用原文匹配的评论，避免混入普通章评。
 • v0.4.46 EPUB 独立段评文件加入非线性 spine，使 KOReader 将其识别为内部脚注目标；重建时清除旧排版缓存。
 • v0.4.47 单章段评下载移到可取消后台子进程，网页与App接口回退期间不再锁死阅读界面；点进度窗口即可取消。
+• v0.4.48 整本段评只跳过确实含有评论的缓存；旧0条、损坏或空结构缓存自动重新下载，进度窗口显示空缓存重试数量。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
