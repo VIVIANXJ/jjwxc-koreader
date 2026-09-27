@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.40"
+local PLUGIN_VERSION = "0.4.41"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1136,12 +1136,31 @@ function JJ:downloadNovelCommentsStep(task)
         local epub_path,epub_count=self:generateOfflineEpub(task.novel_id,task.novel_title,task.author,true)
         if task.dialog then task.refreshing=true; UIManager:close(task.dialog); task.dialog=nil end
         self.download_task=nil
-        msg("整本段评下载完成。\n\n已缓存章节："..task.cached
+        local done_text="整本段评下载完成。\n\n已缓存章节："..task.cached
             .."\n评论总数："..task.comments_total
             .."\n失败章节："..task.failed
             ..(task.last_error and ("\n最近错误："..tostring(task.last_error):sub(1,180)) or "")
             ..(epub_path and ("\n离线 EPUB：已写入段评（"..tostring(epub_count).." 章）")
-                or "\n离线 EPUB：未能更新"),6)
+                or "\n离线 EPUB：未能更新")
+        -- Whole-book downloads used to update only the EPUB. If this novel's
+        -- stable HTML is open, rebuild that chapter too so its badges appear
+        -- immediately without leaving and reopening the book.
+        local current=self:getCurrentChapterContext()
+        local refreshed=false
+        if current and tostring(current.novel_id)==tostring(task.novel_id) then
+            local body=self:loadChapterCache(current.novel_id,current.book,current.chapter_id)
+            if body then
+                refreshed=true
+                self:renderChapterData(current.novel_id,current.chapter_id,
+                    current.book or task.novel_title,current.title or "当前章节",
+                    current.author or task.author,body,true,true,false)
+            end
+        end
+        if refreshed then
+            UIManager:scheduleIn(1.2,function() msg(done_text.."\n当前 HTML：已刷新",6) end)
+        else
+            msg(done_text,6)
+        end
         return
     end
     task.running=true
@@ -2087,7 +2106,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.40
+    msg([[JJWXC for KOReader v0.4.41
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2134,6 +2153,7 @@ function JJ:showHelp()
 • v0.4.38 离线 EPUB 段评补充标准 role/epub:type 与 CREngine 脚注提示，并扩大数字点击区域，减少点空后被当作普通翻页。
 • v0.4.39 下载本章段评后会原地刷新并保留当前页；在 HTML 第一页继续向前翻会进入上一章末页。
 • v0.4.40 整本段评遇到 DNS、断网或超时会停在当前章并自动暂停；联网后点继续即可重试，不再连续制造失败记录。
+• v0.4.41 整本段评完成后立即刷新当前 HTML；EPUB 脚注内容从正文排版中隐藏，只在轻点数字时作为弹窗目标显示。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
