@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.46"
+local PLUGIN_VERSION = "0.4.47"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -2026,11 +2026,36 @@ function JJ:cacheCurrentChapterParagraphComments(force,show_result)
     if not ctx then if show_result then msg("当前不是晋江插件正文。") end return end
     if not force and self:loadParagraphChapterCache(ctx.novel_id,ctx.chapter_id) then return end
     self:runOnline(function()
-        if show_result then msg("正在下载本章全部段评…",1) end
-        local data,err=self:downloadChapterParagraphComments(ctx)
-        if not data then if show_result then msg("离线段评下载失败：\n"..tostring(err)) end return end
-        local ok,save_err=self:saveParagraphChapterCache(ctx,data)
-        if not ok then if show_result then msg(tostring(save_err)) end return end
+        local function fetch_current_comments()
+            self.client.bulk_download=true
+            local ok_fetch,data,err=pcall(function()
+                local result,result_err=self:downloadChapterParagraphComments(ctx)
+                return result,result_err
+            end)
+            self.client.bulk_download=false
+            if not ok_fetch then return {ok=false,error=tostring(data)} end
+            if not data then return {ok=false,error=tostring(err or "未知错误")} end
+            local saved,save_err=self:saveParagraphChapterCache(ctx,data)
+            if not saved then return {ok=false,error=tostring(save_err or "段评缓存写入失败")} end
+            local root=type(data.data)=="table" and data.data or data
+            return {ok=true,total=tonumber(root.commentTotal or 0) or 0,
+                indexed=tonumber(root.indexedParagraphs or 0) or 0}
+        end
+        local completed,result
+        local ok_tr,Trapper=pcall(require,"ui/trapper")
+        if ok_tr and Trapper and Trapper.dismissableRunInSubprocess then
+            completed,result=Trapper:dismissableRunInSubprocess(fetch_current_comments,
+                "正在下载本章全部段评…\n\n可能依次尝试网页和 App 接口。点窗口可取消。")
+        else
+            completed=true; result=fetch_current_comments()
+        end
+        if not completed then
+            if show_result then msg("已取消本章段评下载。",2) end
+            return
+        end
+        local succeeded=type(result)=="table" and result.ok
+        local err=type(result)=="table" and result.error or "后台下载失败"
+        if not succeeded then if show_result then msg("离线段评下载失败：\n"..tostring(err)) end return end
         -- Rebuild and reload the stable HTML immediately so newly downloaded
         -- badges appear without closing the book. Paragraph ids stay stable,
         -- therefore KOReader can preserve the current xpointer/page.
@@ -2042,9 +2067,8 @@ function JJ:cacheCurrentChapterParagraphComments(force,show_result)
                 ctx.title or "当前章节",ctx.author or "",body,true,true,false)
         end
         if show_result then
-            local root=data.data or data
-            msg("本章离线段评已保存。\n\n评论："..tostring(root.commentTotal or 0)
-                .." 条\n有段评段落："..tostring(root.indexedParagraphs or 0).." 个",3)
+            msg("本章离线段评已保存。\n\n评论："..tostring(result.total or 0)
+                .." 条\n有段评段落："..tostring(result.indexed or 0).." 个",3)
         end
     end)
 end
@@ -2223,7 +2247,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.46
+    msg([[JJWXC for KOReader v0.4.47
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2276,6 +2300,7 @@ function JJ:showHelp()
 • v0.4.44 段评下载兼容数组、数字键对象与多层嵌套索引，以及更多计数字段；异常 0 条结果不再覆盖缓存。
 • v0.4.45 网页段评接口返回1004时自动改用App登录接口，并只保留能递归提取段落编号或按引用原文匹配的评论，避免混入普通章评。
 • v0.4.46 EPUB 独立段评文件加入非线性 spine，使 KOReader 将其识别为内部脚注目标；重建时清除旧排版缓存。
+• v0.4.47 单章段评下载移到可取消后台子进程，网页与App接口回退期间不再锁死阅读界面；点进度窗口即可取消。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
