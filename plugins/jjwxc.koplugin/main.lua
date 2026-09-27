@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.43"
+local PLUGIN_VERSION = "0.4.44"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1929,13 +1929,39 @@ function JJ:downloadChapterParagraphComments(ctx)
     if not summary then return nil,"段评索引读取失败："..tostring(summary_err) end
     if type(summary)~="table" then return nil,"段评索引返回格式异常" end
     local sroot=type(summary.data)=="table" and summary.data or summary
-    local index=sroot.paragraphList or sroot.paragraph_list or sroot.list or sroot
+    local index=sroot.paragraphList or sroot.paragraph_list or sroot.paragraphs
+        or sroot.paragraphCommentList or sroot.paragraph_comment_list or sroot.list or sroot
     if type(index)~="table" then return nil,"段评索引没有返回段落列表" end
+    local index_rows={}
+    local seen_index={}
+    local function add_index(pid,total)
+        pid=tonumber(pid); total=tonumber(total)
+        if pid and total and total>0 then
+            if not seen_index[pid] or total>seen_index[pid] then seen_index[pid]=total end
+        end
+    end
+    local function scan_index(node,depth,parent_key)
+        if type(node)~="table" or depth>5 then return end
+        local pid=node.paragraph_id or node.paragraphId or node.paragraphid
+            or node.paragraph_no or node.paragraphNo or node.pid
+        local total=node.comment_total or node.commentTotal or node.commenttotal
+            or node.comment_count or node.commentCount or node.comment_num or node.commentNum
+            or node.count or node.total or node.num
+        if not pid and tonumber(parent_key) then pid=tonumber(parent_key) end
+        if pid and total then add_index(pid,total) end
+        for k,v in pairs(node) do
+            if tonumber(k) and tonumber(v) then add_index(k,v)
+            elseif type(v)=="table" then scan_index(v,depth+1,k) end
+        end
+    end
+    scan_index(index,0,nil)
+    for pid,total in pairs(seen_index) do index_rows[#index_rows+1]={pid=pid,total=total} end
+    table.sort(index_rows,function(a,b) return a.pid<b.pid end)
     local combined={}
     local indexed=0
-    for _,row in ipairs(index) do
-        local pid=tonumber(row.paragraph_id or row.paragraphId or row.paragraphid)
-        local expected=tonumber(row.comment_total or row.commentTotal or row.total or 0) or 0
+    for _,row in ipairs(index_rows) do
+        local pid=row.pid
+        local expected=row.total
         if pid and expected>0 then
             indexed=indexed+1
             local offset=0
@@ -1943,18 +1969,34 @@ function JJ:downloadChapterParagraphComments(ctx)
                 local page,page_err=self.client:getParagraphComments(ctx.novel_id,ctx.chapter_id,pid,2,offset,100)
                 if not page then return nil,"第 "..tostring(pid).." 段下载失败："..tostring(page_err) end
                 local proot=type(page.data)=="table" and page.data or page
-                local rows=proot.commentList or proot.commentlist or proot.list or {}
+                local rows=proot.commentList or proot.commentlist or proot.comments
+                    or proot.comment_list or proot.list
+                if not rows and #proot>0 then rows=proot end
                 if type(rows)~="table" then
                     return nil,"第 "..tostring(pid).." 段没有返回评论列表"
                 end
-                for _,comment in ipairs(rows) do
-                    comment._jj_pid=pid
-                    combined[#combined+1]=comment
+                local page_count=0
+                for _,comment in pairs(rows) do
+                    if type(comment)=="table" then
+                        comment._jj_pid=pid
+                        combined[#combined+1]=comment
+                        page_count=page_count+1
+                    end
                 end
-                if #rows<100 then break end
-                offset=offset+#rows
+                if page_count==0 then break end
+                if page_count<100 then break end
+                offset=offset+page_count
             end
         end
+    end
+    if indexed==0 then
+        local code=summary.code or sroot.code or "无"
+        local message=summary.message or sroot.message or "未返回可识别的段落计数"
+        return nil,"段评索引解析为空（code="..tostring(code).."）："..tostring(message)
+            .."。为防止覆盖已有缓存，本次没有保存 0 条结果。"
+    end
+    if #combined==0 then
+        return nil,"段评索引显示有评论，但评论列表解析为 0 条。为防止覆盖已有缓存，本次没有保存。"
     end
     return {code=summary.code,message=summary.message,
         data={commentTotal=#combined,commentList=combined,indexedParagraphs=indexed}},nil
@@ -2162,7 +2204,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.43
+    msg([[JJWXC for KOReader v0.4.44
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2212,6 +2254,7 @@ function JJ:showHelp()
 • v0.4.41 整本段评完成后立即刷新当前 HTML；EPUB 脚注内容从正文排版中隐藏，只在轻点数字时作为弹窗目标显示。
 • v0.4.42 HTML 与 EPUB 生成时按段评引用原文重新匹配渲染段落；已有缓存无需重下。EPUB 弹窗采用与 HTML 相同的原文、作者、时间、赞数、正文和回复排版。
 • v0.4.43 新增“从缓存重建本章段评标记”及匹配统计；EPUB 每个段落的段评使用独立 XHTML，避免一次弹出全章所有段评。
+• v0.4.44 段评下载兼容数组、数字键对象与多层嵌套索引，以及更多计数字段；异常 0 条结果不再覆盖缓存。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
