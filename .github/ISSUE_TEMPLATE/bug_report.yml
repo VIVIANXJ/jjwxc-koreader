@@ -1,0 +1,47 @@
+name: 错误报告
+description: 报告可以重复出现的插件问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请勿上传 Token、密码、完整正文、段评缓存、设备序列号或 MAC 地址。
+  - type: input
+    id: version
+    attributes:
+      label: 插件版本
+      placeholder: 例如 0.4.32
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 设备与 KOReader 版本
+      placeholder: 例如 Kobo Libra Colour / KOReader 2026.xx
+    validations:
+      required: true
+  - type: dropdown
+    id: simpleui
+    attributes:
+      label: 是否使用 Simple UI
+      options: [是, 否, 不确定]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 重现步骤
+      description: 请按顺序说明操作以及实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏的错误文字或日志
+      render: text

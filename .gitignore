@@ -1,0 +1,15 @@
+.DS_Store
+dist/
+*.epub
+*.zip
+*.log
+
+# Never commit local KOReader/JJWXC state or downloaded content.
+settings/
+cache/
+downloads/
+JJWXC/
+段评缓存/
+评论缓存/
+*.sdr/
+jjwxc.lua

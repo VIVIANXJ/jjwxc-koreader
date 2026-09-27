@@ -1,0 +1,25 @@
+name: 功能建议
+description: 提议兼容性或体验改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 使用场景
+      description: 请说明要解决的问题，而不仅是实现方式。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: checkboxes
+    id: rights
+    attributes:
+      label: 内容与权限
+      options:
+        - label: 此建议不要求绕过购买、权限、验证码或账号限制
+          required: true
