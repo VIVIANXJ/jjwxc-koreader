@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.42"
+local PLUGIN_VERSION = "0.4.43"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -153,6 +153,9 @@ function JJ:onDispatcherRegisterActions()
     Dispatcher:registerAction("jjwxc_cache_paragraph_comments", {
         category="none", event="JJWXCCacheParagraphComments", title="晋江：下载本章离线段评", reader=true,
     })
+    Dispatcher:registerAction("jjwxc_rebuild_current_html_comments", {
+        category="none", event="JJWXCRebuildCurrentHtmlComments", title="晋江：从缓存重建本章段评标记", reader=true,
+    })
     Dispatcher:registerAction("jjwxc_download_novel", {
         category="none", event="JJWXCDownloadNovel", title="晋江：下载本书全部可读章节", reader=true,
     })
@@ -204,6 +207,11 @@ end
 
 function JJ:onJJWXCCacheParagraphComments()
     self:cacheCurrentChapterParagraphComments(true,true)
+    return true
+end
+
+function JJ:onJJWXCRebuildCurrentHtmlComments()
+    self:rebuildCurrentHtmlCommentsFromCache(true)
     return true
 end
 
@@ -291,6 +299,9 @@ function JJ:addToMainMenu(menu_items)
             {text="⬇  下载 / 刷新本章离线段评",callback=function()
                 if self:backendReady() then self:cacheCurrentChapterParagraphComments(true,true) end
             end, enabled_func=function() return self:getCurrentChapterContext()~=nil and self.token~="" end},
+            {text="↻  从缓存重建本章段评标记",callback=function()
+                if self:backendReady() then self:rebuildCurrentHtmlCommentsFromCache(true) end
+            end, enabled_func=function() return self:getCurrentChapterContext()~=nil end},
             {text_func=function()
                 return self.token~="" and "账号：已登录" or "登录晋江"
             end,callback=function()
@@ -872,6 +883,31 @@ function JJ:groupParagraphComments(comment_cache,paragraphs)
         end
     end
     return counts,groups
+end
+
+function JJ:rebuildCurrentHtmlCommentsFromCache(show_result)
+    local ctx=self:getCurrentChapterContext()
+    if not ctx then if show_result then msg("当前不是晋江在线 HTML 正文。") end return end
+    local cache=self:loadParagraphChapterCache(ctx.novel_id,ctx.chapter_id)
+    if not cache then
+        if show_result then msg("当前章节没有本地段评缓存。\n\n请先执行“下载本章离线段评”。") end
+        return
+    end
+    local body=self:loadChapterCache(ctx.novel_id,ctx.book,ctx.chapter_id)
+    if not body then if show_result then msg("当前章节正文缓存不存在，无法重建 HTML。") end return end
+    local paragraphs=Html.paragraph_lines(body.content or body.chapterContent or "")
+    local counts=self:groupParagraphComments(cache,paragraphs)
+    local matched,total=0,0
+    for _,n in pairs(counts) do matched=matched+1; total=total+(tonumber(n) or 0) end
+    self:renderChapterData(ctx.novel_id,ctx.chapter_id,ctx.book or "晋江小说",
+        ctx.title or "当前章节",ctx.author or "",body,true,true,false)
+    if show_result then
+        UIManager:scheduleIn(1.2,function()
+            msg("当前 HTML 已从缓存重建。\n\n缓存评论："..tostring(total)
+                .." 条\n成功匹配段落："..tostring(matched).." 个"
+                ..(matched==0 and "\n\n本章缓存没有可用于定位的段落编号或引用原文。" or ""),5)
+        end)
+    end
 end
 
 function JJ:openOfflineEpub(novel_id,novel_title)
@@ -2126,7 +2162,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.42
+    msg([[JJWXC for KOReader v0.4.43
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2175,6 +2211,7 @@ function JJ:showHelp()
 • v0.4.40 整本段评遇到 DNS、断网或超时会停在当前章并自动暂停；联网后点继续即可重试，不再连续制造失败记录。
 • v0.4.41 整本段评完成后立即刷新当前 HTML；EPUB 脚注内容从正文排版中隐藏，只在轻点数字时作为弹窗目标显示。
 • v0.4.42 HTML 与 EPUB 生成时按段评引用原文重新匹配渲染段落；已有缓存无需重下。EPUB 弹窗采用与 HTML 相同的原文、作者、时间、赞数、正文和回复排版。
+• v0.4.43 新增“从缓存重建本章段评标记”及匹配统计；EPUB 每个段落的段评使用独立 XHTML，避免一次弹出全章所有段评。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

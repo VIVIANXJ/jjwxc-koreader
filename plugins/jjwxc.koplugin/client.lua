@@ -450,7 +450,7 @@ function Client:getParagraphSwitchDiagnostic(novel_id)
         .."&novelid="..urlencode(novel_id)
         .."&setting_type=author_paragraph_comment_switch"
     return self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.43",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id),
         ["Accept-Encoding"]="identity",
     }})
@@ -463,7 +463,7 @@ function Client:getParagraphCommentSummaryDiagnostic(novel_id, chapter_id)
     local endpoint="https://www.jjwxc.net/app.jjwxc/Pc/comment/getNovelParagraphCommentNum"
     local params="novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
     local headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.43",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
     }
@@ -482,7 +482,7 @@ function Client:getParagraphComments(novel_id, chapter_id, paragraph_id, sort_mo
         .."&paragraph_id="..urlencode(paragraph_id)
         .."&offset="..tostring(offset).."&limit="..tostring(limit)
     local data,err=self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.42",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.43",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
     }})

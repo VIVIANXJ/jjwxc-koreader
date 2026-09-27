@@ -148,6 +148,16 @@ function M:register(plugin)
             end,
         },
         {
+            id = "jjwxc_rebuild_current_html_comments",
+            label = "从缓存重建本章段评",
+            icon = plugin_icon,
+            is_in_place = true,
+            is_async_in_place = true,
+            execute = function()
+                local p=currentPlugin(); if p then p:onJJWXCRebuildCurrentHtmlComments() end
+            end,
+        },
+        {
             id = "jjwxc_download_novel",
             label = "下载晋江整本可读章节",
             icon = plugin_icon,
