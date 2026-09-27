@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.38"
+local PLUGIN_VERSION = "0.4.39"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -532,6 +532,25 @@ function JJ:forceChapterStart(expected_file)
             local current=self.ui and self.ui.document and self.ui.document.file or nil
             if self.ui and (not expected_file or current==expected_file) then
                 pcall(function() self.ui:handleEvent(Event:new("GotoPage",1)) end)
+            end
+        end)
+    end
+end
+
+function JJ:forceChapterEnd(expected_file)
+    for _,delay in ipairs({0.08,0.3,0.9}) do
+        UIManager:scheduleIn(delay,function()
+            local current=self.ui and self.ui.document and self.ui.document.file or nil
+            if self.ui and (not expected_file or current==expected_file) then
+                pcall(function()
+                    local info=self.ui.document and self.ui.document.info or {}
+                    local last_page=tonumber(info.number_of_pages)
+                    if last_page and last_page>0 then
+                        self.ui:handleEvent(Event:new("GotoPage",last_page))
+                    else
+                        self.ui:handleEvent(Event:new("GotoPercent",100))
+                    end
+                end)
             end
         end)
     end
@@ -1255,7 +1274,7 @@ function JJ:openAdjacentChapter(prev)
     local id=prev and ctx.prev_id or ctx.next_id
     local title=prev and ctx.prev_title or ctx.next_title
     if not id or id=="" then msg(prev and "已经是第一章。" or "已经是最后一章。") return true end
-    self:openChapter(ctx.novel_id,id,ctx.book or "晋江小说",title or ("第"..id.."章"),ctx.author or "")
+    self:openChapter(ctx.novel_id,id,ctx.book or "晋江小说",title or ("第"..id.."章"),ctx.author or "",prev)
     return true
 end
 
@@ -1276,7 +1295,7 @@ function JJ:onEndOfBook()
     return true
 end
 
-function JJ:openChapter(novel_id,chapter_id,novel_title,chapter_title,author)
+function JJ:openChapter(novel_id,chapter_id,novel_title,chapter_title,author,open_at_end)
     if not self:backendReady() then return end
     local manifest=self:loadOfflineManifest(novel_id,novel_title)
     if manifest and type(manifest.chapters)=="table" then
@@ -1284,7 +1303,7 @@ function JJ:openChapter(novel_id,chapter_id,novel_title,chapter_title,author)
     end
     local cached=self:loadChapterCache(novel_id,novel_title,chapter_id)
     if cached then
-        self:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,cached,true)
+        self:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,cached,true,false,open_at_end)
         return
     end
     self:runOnline(function()
@@ -1292,11 +1311,11 @@ function JJ:openChapter(novel_id,chapter_id,novel_title,chapter_title,author)
         local data,err=self.client:getChapter(novel_id,chapter_id)
         if not data then msg("正文读取失败：\\n"..tostring(err)); return end
         self:saveChapterCache(novel_id,novel_title,chapter_id,data)
-        self:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,data,false)
+        self:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,data,false,false,open_at_end)
     end)
 end
 
-function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,data,from_cache)
+function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,author,data,from_cache,preserve_position,open_at_end)
         if not self:ensureDir(self.download_dir) then msg("无法创建目录："..self.download_dir); return end
         local book_dir=self:bookDir(novel_id,novel_title)
         self:ensureDir(book_dir)
@@ -1360,22 +1379,28 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
         local current=self.ui.document and self.ui.document.file or nil
         if current==file and self.ui.reloadDocument then
             self._switching_chapter=true
-            self.ui:reloadDocument(function()
-                self:clearStableChapterPosition(file)
-            end,true,function()
-                self:forceChapterStart(file)
+            local before_reload=nil
+            if not preserve_position then
+                before_reload=function() self:clearStableChapterPosition(file) end
+            end
+            self.ui:reloadDocument(before_reload,true,function()
+                if open_at_end then
+                    self:forceChapterEnd(file)
+                elseif not preserve_position then
+                    self:forceChapterStart(file)
+                end
                 UIManager:scheduleIn(1.0,function() self._switching_chapter=false end)
             end)
         elseif self.ui.document then
             self:clearStableChapterPosition(file)
             self._switching_chapter=true
             self.ui:switchDocument(file)
-            self:forceChapterStart(file)
+            if open_at_end then self:forceChapterEnd(file) else self:forceChapterStart(file) end
             UIManager:scheduleIn(1.0,function() self._switching_chapter=false end)
         else
             self:clearStableChapterPosition(file)
             self.ui:openFile(file)
-            self:forceChapterStart(file)
+            if open_at_end then self:forceChapterEnd(file) else self:forceChapterStart(file) end
         end
 
         -- KOReader may update history again during ReaderUI init; clean once more afterwards.
@@ -1504,11 +1529,51 @@ function JJ:installTocHandler()
     self._original_show_toc=original
 end
 
+-- ReaderRolling only emits EndOfBook at the forward boundary. It has no
+-- matching event at the beginning, so intercept the shared relative-page
+-- method. This covers taps, swipes, gestures and physical page-turn buttons.
+function JJ:removePreviousChapterBoundaryHandler()
+    if self._page_boundary_owner and self._original_goto_view_rel then
+        self._page_boundary_owner.onGotoViewRel=self._original_goto_view_rel
+    end
+    self._page_boundary_owner=nil
+    self._original_goto_view_rel=nil
+end
+
+function JJ:installPreviousChapterBoundaryHandler()
+    local rolling=self.ui and self.ui.rolling
+    if not rolling or not rolling.onGotoViewRel or self._page_boundary_owner then return end
+    local original=rolling.onGotoViewRel
+    local plugin=self
+    rolling.onGotoViewRel=function(rolling_self,diff,...)
+        if tonumber(diff) and tonumber(diff)<0 and not plugin._switching_chapter then
+            local ctx=plugin:getCurrentChapterContext()
+            local is_scroll=rolling_self.view and rolling_self.view.view_mode=="scroll"
+            local at_start=is_scroll and (tonumber(rolling_self.current_pos) or 0)<=0
+                or (not is_scroll and (tonumber(rolling_self.current_page) or 1)<=1)
+            if ctx and at_start then
+                if ctx.prev_id and ctx.prev_id~="" then
+                    plugin._switching_chapter=true
+                    UIManager:scheduleIn(8.0,function() plugin._switching_chapter=false end)
+                    UIManager:nextTick(function() plugin:openAdjacentChapter(true) end)
+                else
+                    msg("已经是第一章。",2)
+                end
+                return true
+            end
+        end
+        return original(rolling_self,diff,...)
+    end
+    self._page_boundary_owner=rolling
+    self._original_goto_view_rel=original
+end
+
 function JJ:onReaderReady()
     local doc=(self.ui and self.ui.document) or self.document
     local file=doc and doc.file
     self:removeParagraphTapHandler()
     self:removeTocHandler()
+    self:removePreviousChapterBoundaryHandler()
     if not file or not tostring(file):match("%.html$") then return end
     local f=io.open(file,"r")
     if not f then return end
@@ -1550,6 +1615,7 @@ function JJ:onReaderReady()
             self:applyReaderBookMetadata(current_ctx)
             self:installParagraphTapHandler()
             self:installTocHandler()
+            self:installPreviousChapterBoundaryHandler()
             for _,delay in ipairs({0.15,0.8,2.0}) do
                 UIManager:scheduleIn(delay,function()
                     self:removeLegacyChapterEntries(nid,book,stable)
@@ -1578,6 +1644,7 @@ function JJ:onCloseDocument()
     end
     self:removeParagraphTapHandler()
     self:removeTocHandler()
+    self:removePreviousChapterBoundaryHandler()
 end
 
 function JJ:addToHighlightDialog()
@@ -1803,6 +1870,16 @@ function JJ:cacheCurrentChapterParagraphComments(force,show_result)
         if not data then if show_result then msg("离线段评下载失败：\n"..tostring(err)) end return end
         local ok,save_err=self:saveParagraphChapterCache(ctx,data)
         if not ok then if show_result then msg(tostring(save_err)) end return end
+        -- Rebuild and reload the stable HTML immediately so newly downloaded
+        -- badges appear without closing the book. Paragraph ids stay stable,
+        -- therefore KOReader can preserve the current xpointer/page.
+        local current=self:getCurrentChapterContext()
+        local body=self:loadChapterCache(ctx.novel_id,ctx.book,ctx.chapter_id)
+        if current and body and tostring(current.novel_id)==tostring(ctx.novel_id)
+                and tostring(current.chapter_id)==tostring(ctx.chapter_id) then
+            self:renderChapterData(ctx.novel_id,ctx.chapter_id,ctx.book or "晋江小说",
+                ctx.title or "当前章节",ctx.author or "",body,true,true,false)
+        end
         if show_result then
             local root=data.data or data
             msg("本章离线段评已保存。\n\n评论："..tostring(root.commentTotal or 0)
@@ -1985,7 +2062,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.38
+    msg([[JJWXC for KOReader v0.4.39
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2030,6 +2107,7 @@ function JJ:showHelp()
 • v0.4.36 菜单可直接打开本书离线 EPUB；在线 HTML 入口标识更清楚；断网或在线目录失败时自动使用整本下载保存的离线目录。
 • v0.4.37 换章会在关闭旧文档后清除 last_xpointer，并在打开完成后立即跳到第一页；切章期间拦截重复的章节末尾事件。取消打开章节时自动下载整章段评，避免网络请求造成翻页卡顿。
 • v0.4.38 离线 EPUB 段评补充标准 role/epub:type 与 CREngine 脚注提示，并扩大数字点击区域，减少点空后被当作普通翻页。
+• v0.4.39 下载本章段评后会原地刷新并保留当前页；在 HTML 第一页继续向前翻会进入上一章末页。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
