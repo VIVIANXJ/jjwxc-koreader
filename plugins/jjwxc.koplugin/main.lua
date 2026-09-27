@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.49"
+local PLUGIN_VERSION = "0.4.50"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1997,7 +1997,7 @@ function JJ:downloadChapterParagraphComments(ctx)
             local offset=0
             while offset<expected do
                 local page,page_err=self.client:getParagraphComments(ctx.novel_id,ctx.chapter_id,pid,2,offset,100)
-                if not page then return nil,"第 "..tostring(pid).." 段下载失败："..tostring(page_err) end
+                if not page then return nil,"本章第 "..tostring(pid).." 段下载失败："..tostring(page_err) end
                 local proot=type(page.data)=="table" and page.data or page
                 local rows=proot.commentList or proot.commentlist or proot.comments
                     or proot.comment_list or proot.list
@@ -2262,7 +2262,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.49
+    msg([[JJWXC for KOReader v0.4.50
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2318,6 +2318,7 @@ function JJ:showHelp()
 • v0.4.47 单章段评下载移到可取消后台子进程，网页与App接口回退期间不再锁死阅读界面；点进度窗口即可取消。
 • v0.4.48 整本段评只跳过确实含有评论的缓存；旧0条、损坏或空结构缓存自动重新下载，进度窗口显示空缓存重试数量。
 • v0.4.49 批量段评遇到 HTTP wantread/wantwrite 时最多补试1次；仍失败就记录并继续下一章，不会无限等待。
+• v0.4.50 EPUB 段评改为同章内嵌脚注，点数字由 KOReader 弹窗显示，不再打开独立段评页。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

@@ -57,14 +57,13 @@ function E.build(path,meta,chapters)
         nav[#nav+1]='<li><a href="'..name..'">'..esc(ch.title)..'</a></li>'
         manifest[#manifest+1]='<item id="c'..i..'" href="'..name..'" media-type="application/xhtml+xml"/>'
         spine[#spine+1]='<itemref idref="c'..i..'"/>'
-        local ps={}
+        local ps,notes={},{ }
         for paragraph_id,line in ipairs(ch.paragraphs or {}) do
             local comments=type(ch.comments)=="table" and ch.comments[paragraph_id] or nil
             local badge=""
             if type(comments)=="table" and #comments>0 then
                 local note_id="note-"..tostring(i).."-"..tostring(paragraph_id)
-                local note_name=string.format("note-%04d-%04d.xhtml",i,paragraph_id)
-                badge=' <a class="pcnt" epub:type="noteref" role="doc-noteref" href="'..note_name..'#'..note_id
+                badge=' <a class="pcnt" epub:type="noteref" role="doc-noteref" href="#'..note_id
                     ..'" aria-label="'..tostring(#comments)..' 条段评">'..tostring(#comments)..'</a>'
                 local rows={}
                 for comment_no,c in ipairs(comments) do
@@ -95,20 +94,17 @@ function E.build(path,meta,chapters)
                     ..tostring(paragraph_id)..' 段 · '..tostring(#comments)..' 条段评</h2>'
                     ..'<div class="quote"><strong>原文</strong><br/>「'..esc(line)..'」</div>'
                     ..table.concat(rows,"\n")..'</aside>'
-                local note_manifest_id='n'..i..'-'..paragraph_id
-                manifest[#manifest+1]='<item id="'..note_manifest_id..'" href="'..note_name
-                    ..'" media-type="application/xhtml+xml"/>'
-                spine[#spine+1]='<itemref idref="'..note_manifest_id..'" linear="no"/>'
-                files[#files+1]={"OEBPS/"..note_name,'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN"><head><title>'
-                    ..esc(ch.title)..' · 第 '..tostring(paragraph_id)..' 段评</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>'
-                    ..note_html..'</body></html>'}
+                -- Keep the footnote target in the same XHTML document and
+                -- after its noteref. CREngine can then recognize it as a
+                -- popup footnote instead of navigating to a separate page.
+                notes[#notes+1]=note_html
             end
             ps[#ps+1]="<p>"..esc(line)..badge.."</p>"
         end
         if ch.say and ch.say~="" then ps[#ps+1]="<hr/><h2>作者有话说</h2><p>"..esc(ch.say).."</p>" end
-        files[#files+1]={"OEBPS/"..name,'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN"><head><title>'..esc(ch.title)..'</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><h1>'..esc(ch.title)..'</h1>'..table.concat(ps,"\n")..'</body></html>'}
+        files[#files+1]={"OEBPS/"..name,'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN"><head><title>'..esc(ch.title)..'</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><h1>'..esc(ch.title)..'</h1>'..table.concat(ps,"\n")..table.concat(notes,"\n")..'</body></html>'}
     end
-    files[#files+1]={"OEBPS/style.css","body{line-height:1.7;margin:5%;}h1{font-size:1.4em;}p{text-align:justify;margin:.75em 0;}.pcnt{-cr-hint:noteref;display:inline-block;text-decoration:underline;font-size:.9em;padding:0 .38em;margin:0 -.15em;}.footnote{-cr-hint:footnote;}.footnote h2{font-size:1.15em}.quote{border-left:3px solid #888;padding:.5em .8em;margin:.7em 0 1.2em;opacity:.78}.footnote article{border-top:1px solid #aaa;padding:1em 0}.meta{font-size:.82em;opacity:.72;margin-bottom:.5em}.comment-body{font-size:1em}.reply{margin:.7em 0 0 1em;padding:.55em .7em;border-left:2px solid #aaa;font-size:.9em}"}
+    files[#files+1]={"OEBPS/style.css","body{line-height:1.7;margin:5%;}h1{font-size:1.4em;}p{text-align:justify;margin:.75em 0;}.pcnt{-cr-hint:noteref;display:inline-block;text-decoration:underline;font-size:.9em;padding:0 .38em;margin:0 -.15em;}.footnote{-cr-hint:footnote non-linear;}.footnote h2{font-size:1.15em}.quote{border-left:3px solid #888;padding:.5em .8em;margin:.7em 0 1.2em;opacity:.78}.footnote article{border-top:1px solid #aaa;padding:1em 0}.meta{font-size:.82em;opacity:.72;margin-bottom:.5em}.comment-body{font-size:1em}.reply{margin:.7em 0 0 1em;padding:.55em .7em;border-left:2px solid #aaa;font-size:.9em}"}
     files[#files+1]={"OEBPS/nav.xhtml",'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><h1>目录</h1><ol>'..table.concat(nav)..'</ol></nav></body></html>'}
     files[#files+1]={"OEBPS/package.opf",'<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">jjwxc-'..esc(meta.novel_id)..'</dc:identifier><dc:title>'..esc(meta.title)..'</dc:title><dc:creator>'..esc(meta.author)..'</dc:creator><dc:language>zh-CN</dc:language><meta property="dcterms:modified">'..os.date("!%Y-%m-%dT%H:%M:%SZ")..'</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="css" href="style.css" media-type="text/css"/>'..table.concat(manifest)..'</manifest><spine>'..table.concat(spine)..'</spine></package>'}
     return zip_store(path,files)
