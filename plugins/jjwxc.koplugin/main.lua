@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.44"
+local PLUGIN_VERSION = "0.4.45"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1225,7 +1225,9 @@ function JJ:downloadNovelCommentsStep(task)
         task.cached=task.cached+1
         task.comments_total=task.comments_total+(tonumber(root.commentTotal or 0) or 0)
     else
-        local ctx={novel_id=task.novel_id,chapter_id=id,title=title}
+        local chapter_body=self:loadChapterCache(task.novel_id,task.novel_title,id)
+        local ctx={novel_id=task.novel_id,chapter_id=id,title=title,
+            paragraphs=chapter_body and Html.paragraph_lines(chapter_body.content or chapter_body.chapterContent or "") or {}}
         local function fetch_comments()
             self.client.bulk_download=true
             local ok_fetch,data,comment_err=pcall(function()
@@ -1929,6 +1931,13 @@ function JJ:downloadChapterParagraphComments(ctx)
     if not summary then return nil,"段评索引读取失败："..tostring(summary_err) end
     if type(summary)~="table" then return nil,"段评索引返回格式异常" end
     local sroot=type(summary.data)=="table" and summary.data or summary
+    local summary_code=tonumber(summary.code or sroot.code)
+    if summary_code==1004 then
+        local fallback,fallback_err=self.client:getAppParagraphComments(
+            ctx.novel_id,ctx.chapter_id,ctx.paragraphs)
+        if fallback then return fallback,nil end
+        return nil,"网页段评接口登录验证失败（1004）；App 接口回退失败："..tostring(fallback_err)
+    end
     local index=sroot.paragraphList or sroot.paragraph_list or sroot.paragraphs
         or sroot.paragraphCommentList or sroot.paragraph_comment_list or sroot.list or sroot
     if type(index)~="table" then return nil,"段评索引没有返回段落列表" end
@@ -1990,9 +1999,13 @@ function JJ:downloadChapterParagraphComments(ctx)
         end
     end
     if indexed==0 then
+        local fallback,fallback_err=self.client:getAppParagraphComments(
+            ctx.novel_id,ctx.chapter_id,ctx.paragraphs)
+        if fallback then return fallback,nil end
         local code=summary.code or sroot.code or "无"
         local message=summary.message or sroot.message or "未返回可识别的段落计数"
         return nil,"段评索引解析为空（code="..tostring(code).."）："..tostring(message)
+            .."；App 接口回退失败："..tostring(fallback_err)
             .."。为防止覆盖已有缓存，本次没有保存 0 条结果。"
     end
     if #combined==0 then
@@ -2204,7 +2217,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.44
+    msg([[JJWXC for KOReader v0.4.45
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2255,6 +2268,7 @@ function JJ:showHelp()
 • v0.4.42 HTML 与 EPUB 生成时按段评引用原文重新匹配渲染段落；已有缓存无需重下。EPUB 弹窗采用与 HTML 相同的原文、作者、时间、赞数、正文和回复排版。
 • v0.4.43 新增“从缓存重建本章段评标记”及匹配统计；EPUB 每个段落的段评使用独立 XHTML，避免一次弹出全章所有段评。
 • v0.4.44 段评下载兼容数组、数字键对象与多层嵌套索引，以及更多计数字段；异常 0 条结果不再覆盖缓存。
+• v0.4.45 网页段评接口返回1004时自动改用App登录接口，并只保留能递归提取段落编号或按引用原文匹配的评论，避免混入普通章评。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

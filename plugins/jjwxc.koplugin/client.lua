@@ -303,6 +303,50 @@ function Client:getChapterCommentData(novel_id, chapter_id, sort_mode)
     return data
 end
 
+function Client:getAppParagraphComments(novel_id,chapter_id,paragraphs)
+    local candidates={}
+    local newer,newer_err=self:getChapterCommentData(novel_id,chapter_id,2)
+    if newer then candidates[#candidates+1]=newer end
+    local bulk,bulk_err=self:getAllParagraphComments(novel_id,chapter_id,true)
+    if bulk then candidates[#candidates+1]=bulk end
+    local best,best_localized,best_total=nil,0,0
+    for _,data in ipairs(candidates) do
+        local root,list=comments_root(data)
+        if type(list)=="table" then
+            local localized,total=0,0
+            for _,row in pairs(list) do
+                if type(row)=="table" then
+                    total=total+1
+                    local pid=paragraph_number_from_comment(row)
+                    if pid then row._jj_pid=pid end
+                end
+            end
+            if type(paragraphs)=="table" then
+                self:matchParagraphComments(data,paragraphs)
+            end
+            for _,row in pairs(list) do
+                if type(row)=="table" and tonumber(row._jj_pid) then localized=localized+1 end
+            end
+            if localized>best_localized then
+                best,best_localized,best_total=data,localized,total
+            end
+        end
+    end
+    if best and best_localized>0 then
+        local root,list=comments_root(best)
+        local normalized={}
+        for _,row in pairs(list or {}) do
+            if type(row)=="table" and tonumber(row._jj_pid) then normalized[#normalized+1]=row end
+        end
+        return {code=best.code,message=best.message,
+            data={commentTotal=#normalized,commentList=normalized,indexedParagraphs=best_localized,
+                appFallback=true,sourceTotal=best_total}},nil
+    end
+    return nil,"App 接口没有返回可定位到段落的评论"
+        ..(newer_err and ("；新版接口："..tostring(newer_err)) or "")
+        ..(bulk_err and ("；整章接口："..tostring(bulk_err)) or "")
+end
+
 local function normalized_runes(value)
     value=tostring(value or "")
     value=value:gsub("<[^>]+>",""):gsub("&nbsp;"," "):gsub("&amp;","&")
@@ -450,7 +494,7 @@ function Client:getParagraphSwitchDiagnostic(novel_id)
         .."&novelid="..urlencode(novel_id)
         .."&setting_type=author_paragraph_comment_switch"
     return self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.44",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.45",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id),
         ["Accept-Encoding"]="identity",
     }})
@@ -461,11 +505,13 @@ function Client:getParagraphCommentSummaryDiagnostic(novel_id, chapter_id)
     -- current desktop reader. Unlike the Android route, it returns the real
     -- paragraph index without a device signature.
     local endpoint="https://www.jjwxc.net/app.jjwxc/Pc/comment/getNovelParagraphCommentNum"
-    local params="novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
+    local params="versionCode=489&novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
+    if self.token~="" then params=params.."&token="..urlencode(self.token) end
     local headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.44",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.45",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
+        ["versionCode"]="489",
     }
     local data,err=self:getJSON(endpoint.."?"..params,{headers=headers})
     if not data then return nil,err end
@@ -477,14 +523,16 @@ function Client:getParagraphComments(novel_id, chapter_id, paragraph_id, sort_mo
     offset=tonumber(offset) or 0
     limit=tonumber(limit) or 100
     local url="https://www.jjwxc.net/app.jjwxc/Pc/comment/getCommentList"
-        .."?novelId="..urlencode(novel_id)
+        .."?versionCode=489&novelId="..urlencode(novel_id)
         .."&chapterId="..urlencode(chapter_id)
         .."&paragraph_id="..urlencode(paragraph_id)
         .."&offset="..tostring(offset).."&limit="..tostring(limit)
+    if self.token~="" then url=url.."&token="..urlencode(self.token) end
     local data,err=self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.44",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.45",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
+        ["versionCode"]="489",
     }})
     if not data then return nil,err end
     return data
