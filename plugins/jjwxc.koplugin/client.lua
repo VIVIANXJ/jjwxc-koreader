@@ -466,7 +466,7 @@ function Client:getAllParagraphComments(novel_id, chapter_id, force)
         local headers={
             ["versionCode"]=version,["version-code"]=version,["source"]="android",
             ["versiontype"]="reading",
-            ["User-Agent"]="JINJIANG-Android/"..version.." KOReader-JJWXC/0.4.52",
+            ["User-Agent"]="JINJIANG-Android/"..version.." KOReader-JJWXC/0.4.53",
             ["Referer"]="http://android.jjwxc.net/?v="..version,
             ["Accept-Encoding"]="identity",
             ["Content-Type"]="application/x-www-form-urlencoded",
@@ -508,7 +508,7 @@ function Client:getParagraphSwitchDiagnostic(novel_id)
         .."&novelid="..urlencode(novel_id)
         .."&setting_type=author_paragraph_comment_switch"
     return self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.52",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.53",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id),
         ["Accept-Encoding"]="identity",
     }})
@@ -522,7 +522,7 @@ function Client:getParagraphCommentSummaryDiagnostic(novel_id, chapter_id)
     local params="versionCode=489&novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
     if self.token~="" then params=params.."&token="..urlencode(self.token) end
     local headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.52",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.53",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
         ["versionCode"]="489",
@@ -543,7 +543,7 @@ function Client:getParagraphComments(novel_id, chapter_id, paragraph_id, sort_mo
         .."&offset="..tostring(offset).."&limit="..tostring(limit)
     if self.token~="" then url=url.."&token="..urlencode(self.token) end
     local data,err=self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.52",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.53",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
         ["versionCode"]="489",

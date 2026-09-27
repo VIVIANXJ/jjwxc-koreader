@@ -15,6 +15,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 local util = require("util")
 local ReadHistory = require("readhistory")
+local ok_ffiutil, ffiutil = pcall(require, "ffi/util")
 
 local ok_client, Client = pcall(require, "client")
 local ok_html, Html = pcall(require, "html")
@@ -54,7 +55,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.52"
+local PLUGIN_VERSION = "0.4.53"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -87,6 +88,8 @@ function JJ:init()
     self.download_dir=self.settings:readSetting("download_dir",DataStorage:getDataDir().."/JJWXC")
     self.progress=self.settings:readSetting("progress",{}) or {}
     self.paragraph_drafts=self.settings:readSetting("paragraph_drafts",{}) or {}
+    self.auto_prefetch_next_comments=self.settings:readSetting("auto_prefetch_next_comments",false)==true
+    self._comment_prefetch_attempted={}
     self.chapter_lists={}
     self.novel_meta={}
     self.backend_error=backend_load_error
@@ -299,6 +302,11 @@ function JJ:addToMainMenu(menu_items)
             {text="⬇  下载 / 刷新本章离线段评",callback=function()
                 if self:backendReady() then self:cacheCurrentChapterParagraphComments(true,true) end
             end, enabled_func=function() return self:getCurrentChapterContext()~=nil and self.token~="" end},
+            {text="自动预载下一章段评",checked_func=function()
+                return self.auto_prefetch_next_comments==true
+            end,callback=function()
+                self:setAutoPrefetchNextComments(not self.auto_prefetch_next_comments)
+            end},
             {text="↻  从缓存重建本章段评标记",callback=function()
                 if self:backendReady() then self:rebuildCurrentHtmlCommentsFromCache(true) end
             end, enabled_func=function() return self:getCurrentChapterContext()~=nil end},
@@ -321,6 +329,81 @@ end
 function JJ:runOnline(fn)
     if NetworkMgr:willRerunWhenOnline(fn) then return end
     fn()
+end
+
+function JJ:setAutoPrefetchNextComments(enabled)
+    self.auto_prefetch_next_comments=enabled==true
+    self.settings:saveSetting("auto_prefetch_next_comments",self.auto_prefetch_next_comments)
+    self.settings:flush()
+    if not self.auto_prefetch_next_comments then
+        if self._comment_prefetch_pid and ok_ffiutil and ffiutil.terminateSubProcess then
+            pcall(function() ffiutil.terminateSubProcess(self._comment_prefetch_pid) end)
+        end
+        self._comment_prefetch_pid=nil
+        msg("已关闭自动预载下一章段评。",2)
+        return
+    end
+    msg("已开启自动预载下一章段评。\n\n只处理下一章，阅读和翻页不会被锁住。",3)
+    local ctx=self:getCurrentChapterContext()
+    if ctx then self:scheduleNextChapterCommentPrefetch(ctx,0.5) end
+end
+
+function JJ:scheduleNextChapterCommentPrefetch(ctx,delay)
+    if not self.auto_prefetch_next_comments or self.token=="" or not ctx or not ctx.next_id then return end
+    local expected_file=ctx.file
+    UIManager:scheduleIn(delay or 2.0,function()
+        local current=self:getCurrentChapterContext()
+        if not current or current.file~=expected_file
+                or tostring(current.chapter_id)~=tostring(ctx.chapter_id) then return end
+        self:startNextChapterCommentPrefetch(current)
+    end)
+end
+
+function JJ:startNextChapterCommentPrefetch(ctx)
+    if not self.auto_prefetch_next_comments or self.token=="" or not ctx.next_id then return end
+    if self._comment_prefetch_pid then return end
+    local next_id=tostring(ctx.next_id)
+    local existing=self:loadParagraphChapterCache(ctx.novel_id,next_id)
+    if existing and self:paragraphCacheCommentCount(existing)>0 then return end
+    local key=tostring(ctx.novel_id)..":"..next_id
+    if self._comment_prefetch_attempted[key] then return end
+    self._comment_prefetch_attempted[key]=true
+    if not ok_ffiutil or not ffiutil.runInSubProcess then return end
+
+    local plugin=self
+    local pid=ffiutil.runInSubProcess(function()
+        plugin.client.bulk_download=true
+        local body=plugin:loadChapterCache(ctx.novel_id,ctx.book,next_id)
+        if not body then
+            local fetched=plugin.client:getChapter(ctx.novel_id,next_id)
+            if not fetched then return end
+            body=fetched
+            plugin:saveChapterCache(ctx.novel_id,ctx.book,next_id,body)
+        end
+        local prefetch_ctx={novel_id=ctx.novel_id,chapter_id=next_id,
+            title=ctx.next_title or ("第 "..next_id.." 章"),
+            paragraphs=Html.paragraph_lines(body.content or body.chapterContent or "")}
+        local data=plugin:downloadChapterParagraphComments(prefetch_ctx)
+        if data then plugin:saveParagraphChapterCache(prefetch_ctx,data) end
+    end, false)
+    if not pid then return end
+    self._comment_prefetch_pid=pid
+    local function poll()
+        if self._comment_prefetch_pid~=pid then return end
+        if ffiutil.isSubProcessDone(pid) then
+            self._comment_prefetch_pid=nil
+            local current=self:getCurrentChapterContext()
+            -- Never rebuild an already open chapter here: replacing the HTML
+            -- document would cause an e-ink refresh/flash and might disturb the
+            -- reading position. A chapter opened after prefetch completion will
+            -- pick up the cache normally; an already-open one can be rebuilt
+            -- manually from the menu if desired.
+            if current then self:scheduleNextChapterCommentPrefetch(current,0.5) end
+            return
+        end
+        UIManager:scheduleIn(0.75,poll)
+    end
+    UIManager:scheduleIn(0.75,poll)
 end
 
 function JJ:startLogin()
@@ -1794,6 +1877,7 @@ function JJ:onReaderReady()
             self:installParagraphTapHandler()
             self:installTocHandler()
             self:installPreviousChapterBoundaryHandler()
+            self:scheduleNextChapterCommentPrefetch(current_ctx,2.0)
             for _,delay in ipairs({0.15,0.8,2.0}) do
                 UIManager:scheduleIn(delay,function()
                     self:removeLegacyChapterEntries(nid,book,stable)
@@ -2329,7 +2413,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.52
+    msg([[JJWXC for KOReader v0.4.53
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2388,6 +2472,7 @@ function JJ:showHelp()
 • v0.4.50 EPUB 段评改为同章内嵌脚注，点数字由 KOReader 弹窗显示，不再打开独立段评页。
 • v0.4.51 按 KOReader/CREngine 的脚注兼容方式隐藏同章脚注正文，避免打开 EPUB 就在章节末尾展开全部段评。
 • v0.4.52 插件直接接管离线 EPUB 的段评数字，从本地缓存打开与 HTML 模式相同的段评窗口，不再受 KOReader 默认脚注样式限制。
+• v0.4.53 HTML 阅读可选自动预载下一章段评；使用独立后台进程，不锁住阅读界面，并可在菜单随时关闭。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
