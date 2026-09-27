@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.36"
+local PLUGIN_VERSION = "0.4.37"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -535,6 +535,15 @@ function JJ:forceChapterStart(expected_file)
             end
         end)
     end
+end
+
+function JJ:clearStableChapterPosition(file)
+    local ok,ds=pcall(function() return DocSettings:open(file) end)
+    if not ok or not ds then return end
+    ds:delSetting("last_xpointer")
+    ds:delSetting("last_percent")
+    ds:saveSetting("percent_finished",0)
+    ds:flush()
 end
 
 
@@ -1256,7 +1265,10 @@ end
 function JJ:onEndOfBook()
     local ctx=self:getCurrentChapterContext()
     if not ctx then return false end
+    if self._switching_chapter then return true end
     if ctx.next_id and ctx.next_id~="" then
+        self._switching_chapter=true
+        UIManager:scheduleIn(8.0,function() self._switching_chapter=false end)
         UIManager:nextTick(function() self:openAdjacentChapter(false) end)
     else
         msg("已经是最后一章。",2)
@@ -1289,7 +1301,7 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
         local book_dir=self:bookDir(novel_id,novel_title)
         self:ensureDir(book_dir)
         local novel_meta=self.novel_meta[tostring(novel_id)]
-        if not novel_meta then
+        if not novel_meta and not from_cache then
             local info=self.client:getNovelInfo(novel_id)
             if type(info)=="table" then
                 novel_meta={
@@ -1308,12 +1320,19 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
         end
         local prev_ch,next_ch=self:getChapterNav(novel_id,chapter_id)
 
-        -- 晋江真实段评数量接口：返回 paragraph_id / comment_total。
+        -- Never block chapter opening on comment endpoints. Use the offline
+        -- chapter-comment cache when available; manual comment downloads can
+        -- refresh it without making every page turn wait on the network.
         local paragraph_counts={}
-        local paragraph_texts=Html.paragraph_lines(data.content)
-        if not from_cache or (NetworkMgr.isOnline and NetworkMgr:isOnline()) then
-            local summary=self.client:getParagraphCommentSummary(novel_id,chapter_id,paragraph_texts)
-            if type(summary)=="table" then paragraph_counts=summary end
+        local comment_cache=self:loadParagraphChapterCache(novel_id,chapter_id)
+        local comment_root=type(comment_cache)=="table"
+            and (type(comment_cache.data)=="table" and comment_cache.data or comment_cache) or {}
+        local comment_rows=comment_root.commentList or comment_root.commentlist or comment_root.list or {}
+        if type(comment_rows)=="table" then
+            for _,row in ipairs(comment_rows) do
+                local pid=tonumber(row._jj_pid or row.paragraph_id or row.paragraphId or row.paragraphid)
+                if pid then paragraph_counts[pid]=(paragraph_counts[pid] or 0)+1 end
+            end
         end
 
         -- 关键改动：每本晋江小说始终只使用一个固定 HTML 文件。
@@ -1340,13 +1359,24 @@ function JJ:renderChapterData(novel_id,chapter_id,novel_title,chapter_title,auth
 
         local current=self.ui.document and self.ui.document.file or nil
         if current==file and self.ui.reloadDocument then
-            self.ui:reloadDocument(nil,true)
+            self._switching_chapter=true
+            self.ui:reloadDocument(function()
+                self:clearStableChapterPosition(file)
+            end,true,function()
+                self:forceChapterStart(file)
+                UIManager:scheduleIn(1.0,function() self._switching_chapter=false end)
+            end)
         elseif self.ui.document then
+            self:clearStableChapterPosition(file)
+            self._switching_chapter=true
             self.ui:switchDocument(file)
+            self:forceChapterStart(file)
+            UIManager:scheduleIn(1.0,function() self._switching_chapter=false end)
         else
+            self:clearStableChapterPosition(file)
             self.ui:openFile(file)
+            self:forceChapterStart(file)
         end
-        self:forceChapterStart(file)
 
         -- KOReader may update history again during ReaderUI init; clean once more afterwards.
         for _,delay in ipairs({0.4,1.3,3.0}) do
@@ -1520,16 +1550,6 @@ function JJ:onReaderReady()
             self:applyReaderBookMetadata(current_ctx)
             self:installParagraphTapHandler()
             self:installTocHandler()
-            -- Download the complete chapter comment set once while online.
-            -- A saved cache is never refreshed silently, so opening an older
-            -- chapter remains fast and does not waste network traffic.
-            UIManager:scheduleIn(1.2,function()
-                local now=self:getCurrentChapterContext()
-                if now and now.novel_id==nid and now.chapter_id==cid
-                        and self.token~="" and NetworkMgr.isOnline and NetworkMgr:isOnline() then
-                    self:cacheCurrentChapterParagraphComments(false,false)
-                end
-            end)
             for _,delay in ipairs({0.15,0.8,2.0}) do
                 UIManager:scheduleIn(delay,function()
                     self:removeLegacyChapterEntries(nid,book,stable)
@@ -1965,7 +1985,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.36
+    msg([[JJWXC for KOReader v0.4.37
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2008,6 +2028,7 @@ function JJ:showHelp()
 • v0.4.34 已缓存段评会写入离线 EPUB；正文后的数字使用 EPUB 脚注链接，轻点可在 KOReader 中弹窗查看。整本段评完成后自动更新同一个 EPUB。
 • v0.4.35 移除会与 KOReader 页面 Show 事件冲突的兼容入口；翻到章节末尾后不再误触发“同步晋江书架”。延迟的旧章节迁移与跳首页动作也会核对当前文件，避免 HTML 与 EPUB 互相拉回。
 • v0.4.36 菜单可直接打开本书离线 EPUB；在线 HTML 入口标识更清楚；断网或在线目录失败时自动使用整本下载保存的离线目录。
+• v0.4.37 换章会在关闭旧文档后清除 last_xpointer，并在打开完成后立即跳到第一页；切章期间拦截重复的章节末尾事件。取消打开章节时自动下载整章段评，避免网络请求造成翻页卡顿。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
