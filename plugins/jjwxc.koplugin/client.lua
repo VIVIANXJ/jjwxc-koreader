@@ -82,29 +82,43 @@ function Client:setToken(token) self.token = token or "" end
 
 function Client:request(url, opts)
     opts = opts or {}
-    local sink = {}
     local headers = opts.headers or {}
     headers["User-Agent"] = headers["User-Agent"] or ("Mobile " .. tostring(os.time()))
     if opts.body then headers["content-length"] = tostring(#opts.body) end
     -- Bulk chapter downloads run in a cancellable subprocess. Keep their
     -- timeout bounded so a dead endpoint cannot leave a device waiting long.
-    socketutil:set_timeout(opts.block_timeout or (self.bulk_download and 8 or 20),
-        opts.total_timeout or (self.bulk_download and 20 or 45))
-    local req = {
-        url = url,
-        method = opts.method or "GET",
-        headers = headers,
-        sink = ltn12.sink.table(sink),
-    }
-    if opts.body then req.source = ltn12.source.string(opts.body) end
     local transport = url:match("^https://") and https or http
-    local _, code, resp_headers, status = transport.request(req)
-    socketutil:reset_timeout()
-    local body = table.concat(sink)
-    if tonumber(code) ~= 200 then
-        return nil, string.format("HTTP %s %s", tostring(code), tostring(status or "")), resp_headers
+    local attempts = self.bulk_download and 2 or 1
+    local last_err, last_headers
+    for _attempt = 1, attempts do
+        local sink = {}
+        socketutil:set_timeout(opts.block_timeout or (self.bulk_download and 12 or 20),
+            opts.total_timeout or (self.bulk_download and 30 or 45))
+        local req = {
+            url = url,
+            method = opts.method or "GET",
+            headers = headers,
+            sink = ltn12.sink.table(sink),
+        }
+        if opts.body then req.source = ltn12.source.string(opts.body) end
+        local called, result, code, resp_headers, status = pcall(transport.request, req)
+        socketutil:reset_timeout()
+        if called and tonumber(code) == 200 then
+            return table.concat(sink), nil, resp_headers
+        end
+        if called then
+            last_err = string.format("HTTP %s %s", tostring(code), tostring(status or ""))
+            last_headers = resp_headers
+        else
+            last_err = tostring(result)
+        end
+        local lower = last_err:lower()
+        if not lower:find("wantread", 1, true)
+                and not lower:find("wantwrite", 1, true) then
+            break
+        end
     end
-    return body, nil, resp_headers
+    return nil, last_err or "HTTP 请求失败", last_headers
 end
 
 function Client:getJSON(url, opts)
@@ -452,7 +466,7 @@ function Client:getAllParagraphComments(novel_id, chapter_id, force)
         local headers={
             ["versionCode"]=version,["version-code"]=version,["source"]="android",
             ["versiontype"]="reading",
-            ["User-Agent"]="JINJIANG-Android/"..version.." KOReader-JJWXC/0.4.10",
+            ["User-Agent"]="JINJIANG-Android/"..version.." KOReader-JJWXC/0.4.49",
             ["Referer"]="http://android.jjwxc.net/?v="..version,
             ["Accept-Encoding"]="identity",
             ["Content-Type"]="application/x-www-form-urlencoded",
@@ -494,7 +508,7 @@ function Client:getParagraphSwitchDiagnostic(novel_id)
         .."&novelid="..urlencode(novel_id)
         .."&setting_type=author_paragraph_comment_switch"
     return self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.48",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.49",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id),
         ["Accept-Encoding"]="identity",
     }})
@@ -508,7 +522,7 @@ function Client:getParagraphCommentSummaryDiagnostic(novel_id, chapter_id)
     local params="versionCode=489&novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id)
     if self.token~="" then params=params.."&token="..urlencode(self.token) end
     local headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.48",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.49",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
         ["versionCode"]="489",
@@ -529,7 +543,7 @@ function Client:getParagraphComments(novel_id, chapter_id, paragraph_id, sort_mo
         .."&offset="..tostring(offset).."&limit="..tostring(limit)
     if self.token~="" then url=url.."&token="..urlencode(self.token) end
     local data,err=self:getJSON(url,{headers={
-        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.48",
+        ["User-Agent"]="Mozilla/5.0 KOReader-JJWXC/0.4.49",
         ["Referer"]="https://www.jjwxc.net/onebook.php?novelid="..urlencode(novel_id).."&chapterid="..urlencode(chapter_id),
         ["Accept-Encoding"]="identity",
         ["versionCode"]="489",
