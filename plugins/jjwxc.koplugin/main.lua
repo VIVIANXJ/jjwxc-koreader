@@ -54,7 +54,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.51"
+local PLUGIN_VERSION = "0.4.52"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -945,6 +945,7 @@ function JJ:generateOfflineEpub(novel_id,novel_title,author,quiet)
                     local comment_cache=self:loadParagraphChapterCache(novel_id,id)
                     local _,comments_by_paragraph=self:groupParagraphComments(comment_cache,paragraphs)
                     chapters[#chapters+1]={
+                        id=id,
                         title=tostring(title),
                         paragraphs=paragraphs,
                         comments=comments_by_paragraph,
@@ -1563,6 +1564,60 @@ local function paragraph_link_id(link)
     return scan(link,0)
 end
 
+local function epub_paragraph_link(link)
+    local seen={}
+    local function scan(value,depth)
+        if depth>4 or value==nil then return nil end
+        if type(value)=="string" then
+            local cid,pid=value:match("#jjwxc%-note%-(%d+)%-(%d+)")
+            if cid and pid then return tostring(cid),tonumber(pid) end
+            return nil
+        end
+        if type(value)~="table" or seen[value] then return nil end
+        seen[value]=true
+        for _,key in ipairs({"href","url","target","link","uri","dest","destination","src"}) do
+            local cid,pid=scan(value[key],depth+1)
+            if cid then return cid,pid end
+        end
+        for _,child in pairs(value) do
+            local cid,pid=scan(child,depth+1)
+            if cid then return cid,pid end
+        end
+    end
+    return scan(link,0)
+end
+
+function JJ:getCurrentOfflineEpubContext()
+    local doc=(self.ui and self.ui.document) or self.document
+    local file=doc and doc.file
+    if not file or not tostring(file):match("离线版%.epub$") then return nil end
+    local book,novel_id=tostring(file):match("/([^/]+)_(%d+)/[^/]+_离线版%.epub$")
+    if not novel_id or not book then return nil end
+    return {file=file,book=book,novel_id=tostring(novel_id)}
+end
+
+function JJ:showOfflineEpubParagraphComments(epub_ctx,chapter_id,paragraph_id)
+    local manifest=self:loadOfflineManifest(epub_ctx.novel_id,epub_ctx.book)
+    local chapter_title="当前章节"
+    if manifest and type(manifest.chapters)=="table" then
+        for _,chapter in ipairs(manifest.chapters) do
+            local cid=chapter.chapterid or chapter.chapterId or chapter.id
+            if tostring(cid or "")==tostring(chapter_id) then
+                chapter_title=tostring(chapter.chaptername or chapter.chapterName or chapter.name
+                    or ("第 "..tostring(chapter_id).." 章"))
+                break
+            end
+        end
+    end
+    local paragraph=""
+    local body=self:loadChapterCache(epub_ctx.novel_id,epub_ctx.book,chapter_id)
+    if body then
+        local paragraphs=Html.paragraph_lines(body.content or body.chapterContent or "")
+        paragraph=paragraphs[tonumber(paragraph_id)] or ""
+    end
+    self:showParagraphComments(epub_ctx.novel_id,chapter_id,chapter_title,paragraph_id,paragraph)
+end
+
 function JJ:removeParagraphTapHandler()
     if self._paragraph_tap_installed and self.ui then
         pcall(function()
@@ -1575,7 +1630,8 @@ end
 function JJ:installParagraphTapHandler()
     if not self.ui or not self.ui.link or self._paragraph_tap_installed then return end
     local ctx=self:getCurrentChapterContext()
-    if not ctx then return end
+    local epub_ctx=self:getCurrentOfflineEpubContext()
+    if not ctx and not epub_ctx then return end
     self.ui:registerTouchZones({{
         id="jjwxc_paragraph_badge_tap",
         ges="tap",
@@ -1584,6 +1640,13 @@ function JJ:installParagraphTapHandler()
         handler=function(ges)
             local ok,link=pcall(function() return self.ui.link:getLinkFromGes(ges) end)
             if not ok or not link then return false end
+            local chapter_id,epub_pid=epub_paragraph_link(link)
+            if chapter_id and epub_pid then
+                local current_epub=self:getCurrentOfflineEpubContext()
+                if not current_epub then return false end
+                self:showOfflineEpubParagraphComments(current_epub,chapter_id,epub_pid)
+                return true
+            end
             local pid=paragraph_link_id(link)
             if not pid then return false end
             local current=self:getCurrentChapterContext()
@@ -1670,6 +1733,10 @@ function JJ:onReaderReady()
     self:removeParagraphTapHandler()
     self:removeTocHandler()
     self:removePreviousChapterBoundaryHandler()
+    if file and tostring(file):match("离线版%.epub$") then
+        self:installParagraphTapHandler()
+        return
+    end
     if not file or not tostring(file):match("%.html$") then return end
     local f=io.open(file,"r")
     if not f then return end
@@ -2262,7 +2329,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.51
+    msg([[JJWXC for KOReader v0.4.52
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2320,6 +2387,7 @@ function JJ:showHelp()
 • v0.4.49 批量段评遇到 HTTP wantread/wantwrite 时最多补试1次；仍失败就记录并继续下一章，不会无限等待。
 • v0.4.50 EPUB 段评改为同章内嵌脚注，点数字由 KOReader 弹窗显示，不再打开独立段评页。
 • v0.4.51 按 KOReader/CREngine 的脚注兼容方式隐藏同章脚注正文，避免打开 EPUB 就在章节末尾展开全部段评。
+• v0.4.52 插件直接接管离线 EPUB 的段评数字，从本地缓存打开与 HTML 模式相同的段评窗口，不再受 KOReader 默认脚注样式限制。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

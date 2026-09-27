@@ -62,7 +62,7 @@ function E.build(path,meta,chapters)
             local comments=type(ch.comments)=="table" and ch.comments[paragraph_id] or nil
             local badge=""
             if type(comments)=="table" and #comments>0 then
-                local note_id="note-"..tostring(i).."-"..tostring(paragraph_id)
+                local note_id="jjwxc-note-"..tostring(ch.id or i).."-"..tostring(paragraph_id)
                 badge=' <a class="pcnt" epub:type="noteref" role="doc-noteref" href="#'..note_id
                     ..'" aria-label="'..tostring(#comments)..' 条段评">'..tostring(#comments)..'</a>'
                 local rows={}
