@@ -2,6 +2,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local DataStorage = require("datastorage")
 local DocSettings = require("docsettings")
 local Dispatcher = require("dispatcher")
+local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local Event = require("ui/event")
@@ -55,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.53"
+local PLUGIN_VERSION = "0.4.54"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -447,22 +448,45 @@ end
 
 function JJ:promptVerificationMethod(account,password,notice)
     local d
-    d=InputDialog:new{
-        title="晋江设备验证",
-        input="",
-        description=tostring(notice or "晋江要求设备验证。请选择验证码发送方式。"),
-        buttons={{
-            {text="取消",id="close",callback=function() UIManager:close(d) end},
-            {text="发到手机",callback=function()
-                UIManager:close(d)
-                self:sendVerification(account,password,"phone")
-            end},
-            {text="发到邮箱",callback=function()
-                UIManager:close(d)
-                self:sendVerification(account,password,"email")
-            end},
-        }}
-    }
+    if Device:isKindle() then
+        -- There is nothing to type on this screen. On Kindle, InputDialog
+        -- keeps a large empty editor and pushes the buttons off screen.
+        d=ButtonDialog:new{
+            title="晋江设备验证\n请选择验证码接收方式",
+            buttons={
+                {{text="发送到手机",callback=function()
+                    UIManager:close(d)
+                    self:sendVerification(account,password,"phone")
+                end}},
+                {{text="发送到邮箱",callback=function()
+                    UIManager:close(d)
+                    self:sendVerification(account,password,"email")
+                end}},
+                {{text="查看晋江提示",callback=function()
+                    msg(tostring(notice or "晋江要求设备验证。请选择验证码发送方式。"))
+                end}},
+                {{text="取消",callback=function() UIManager:close(d) end}},
+            }
+        }
+    else
+        -- Preserve the existing Kobo layout and behavior.
+        d=InputDialog:new{
+            title="晋江设备验证",
+            input="",
+            description=tostring(notice or "晋江要求设备验证。请选择验证码发送方式。"),
+            buttons={{
+                {text="取消",id="close",callback=function() UIManager:close(d) end},
+                {text="发到手机",callback=function()
+                    UIManager:close(d)
+                    self:sendVerification(account,password,"phone")
+                end},
+                {text="发到邮箱",callback=function()
+                    UIManager:close(d)
+                    self:sendVerification(account,password,"email")
+                end},
+            }}
+        }
+    end
     UIManager:show(d)
 end
 
@@ -482,10 +506,25 @@ end
 
 function JJ:promptVerifyCode(account,password,checktype,notice)
     local d
-    d=InputDialog:new{
-        title="输入晋江验证码",
-        input="",
-        description=tostring(notice or "验证码已发送，请输入收到的验证码。"),
+    local buttons
+    if Device:isKindle() then
+        buttons={
+            {{text="验证并登录",is_enter_default=true,callback=function()
+                local code=util.trim(d:getInputText() or "")
+                if code=="" then msg("请输入验证码") return end
+                UIManager:close(d)
+                self:doLogin(account,password,code,checktype)
+            end}},
+            {
+                {text="重新发送",callback=function()
+                    UIManager:close(d)
+                    self:sendVerification(account,password,checktype)
+                end},
+                {text="取消",id="close",callback=function() UIManager:close(d) end},
+            },
+        }
+    else
+        -- Preserve the existing Kobo button order and single-row layout.
         buttons={{
             {text="取消",id="close",callback=function() UIManager:close(d) end},
             {text="重新发送",callback=function()
@@ -499,6 +538,12 @@ function JJ:promptVerifyCode(account,password,checktype,notice)
                 self:doLogin(account,password,code,checktype)
             end},
         }}
+    end
+    d=InputDialog:new{
+        title="输入晋江验证码",
+        input="",
+        description=tostring(notice or "验证码已发送，请输入收到的验证码。"),
+        buttons=buttons,
     }
     UIManager:show(d); d:onShowKeyboard()
 end
@@ -2413,7 +2458,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.53
+    msg([[JJWXC for KOReader v0.4.54
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2473,6 +2518,7 @@ function JJ:showHelp()
 • v0.4.51 按 KOReader/CREngine 的脚注兼容方式隐藏同章脚注正文，避免打开 EPUB 就在章节末尾展开全部段评。
 • v0.4.52 插件直接接管离线 EPUB 的段评数字，从本地缓存打开与 HTML 模式相同的段评窗口，不再受 KOReader 默认脚注样式限制。
 • v0.4.53 HTML 阅读可选自动预载下一章段评；使用独立后台进程，不锁住阅读界面，并可在菜单随时关闭。
+• v0.4.54 修复 Kindle 设备验证窗口内容和按钮显示不完整的问题。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
