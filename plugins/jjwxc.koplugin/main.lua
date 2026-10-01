@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.56"
+local PLUGIN_VERSION = "0.4.57"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1090,6 +1090,10 @@ function JJ:generateOfflineEpub(novel_id,novel_title,author,quiet)
     local path=self:offlineEpubPath(novel_id,novel_title)
     local epub_meta={
         novel_id=tostring(novel_id), title=tostring(novel_title).."（离线版）", author=author or "",
+        -- Kindle/CREngine may handle semantic noteref links before plugin tap
+        -- zones. Generate a WeRead-style self anchor there; Kobo retains the
+        -- existing standards-based EPUB footnote markup unchanged.
+        kindle_comment_popup_links=Device:isKindle(),
     }
     for _,cover in ipairs({
         {self:bookDir(novel_id,novel_title).."/jjwxc-cover.png","png"},
@@ -2543,7 +2547,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.56
+    msg([[JJWXC for KOReader v0.4.57
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2606,6 +2610,7 @@ function JJ:showHelp()
 • v0.4.54 修复 Kindle 设备验证窗口内容和按钮显示不完整的问题。
 • v0.4.55 参考微读的链接拦截方式，仅在 Kindle 离线 EPUB 中接管段评数字，阻止 KPW3 默认书内跳转并打开本地段评弹窗；Kobo 行为不变。
 • v0.4.56 Kindle 长任务下载期间临时阻止自动休眠，暂停、停止、完成或网络错误时恢复休眠，避免唤醒后进度页面卡顿；Kobo 行为不变。
+• v0.4.57 Kindle 生成 EPUB 时将段评数字改为微读式自指向普通链接，不再声明为标准脚注；插件接管时打开本地段评，接管失败也不会跳章。Kobo 仍使用原脚注结构。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
