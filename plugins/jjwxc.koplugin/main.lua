@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.60"
+local PLUGIN_VERSION = "0.4.61"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1733,7 +1733,10 @@ local function epub_paragraph_link(link)
     local function scan(value,depth)
         if depth>4 or value==nil then return nil end
         if type(value)=="string" then
-            local cid,pid=value:match("#jjwxc%-note%-(%d+)%-(%d+)")
+            -- CREngine returns an xpointer such as
+            -- ...//*[@id='jjwxc-note-123-4'], not the original #href.
+            -- Matching the marker anywhere supports both representations.
+            local cid,pid=value:match("jjwxc%-note%-(%d+)%-(%d+)")
             if cid and pid then return tostring(cid),tonumber(pid) end
             return nil
         end
@@ -2688,7 +2691,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.60
+    msg([[JJWXC for KOReader v0.4.61
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2755,6 +2758,7 @@ function JJ:showHelp()
 • v0.4.58 Kindle 打开离线 EPUB 后延迟重试安装段评点击接管，兼容 KPW3 链接模块晚于 ReaderReady 初始化；并放宽本地 EPUB 路径识别。Kobo 生命周期不变。
 • v0.4.59 完整采用微读的 getLinkFromGes 识别层：Kindle 一识别到晋江段评链接就安排本地弹窗，覆盖绕过 onTap 的 KPW3 路径；仍保留自指向链接，避免事件落入翻页区。Kobo不安装该层。
 • v0.4.60 Kindle 的“调试信息”新增 EPUB 段评诊断，显示上下文、三层接管安装状态、最近点击层和 KOReader 实际链接字段；Kobo 调试内容不变。
+• v0.4.61 修正 CREngine 链接解析：支持从 KPW3 返回的 xpointer 中识别 jjwxc-note，不再要求链接前带 #，从而取得章节和段落编号并打开弹窗。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。

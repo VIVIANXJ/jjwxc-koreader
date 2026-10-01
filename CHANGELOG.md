@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.4.61
+
+- 修正 Kindle/CREngine 的离线 EPUB 段评链接解析。
+- `getLinkFromGes` 在 EPUB 中返回的是包含目标 ID 的 `xpointer`，并非原始 `#href`；解析器现在可从 xpointer 任意位置识别 `jjwxc-note-章节ID-段落ID`。
+- 成功识别后可取得正确章节与段落编号并打开本地段评弹窗。
+- 不改 EPUB 文件结构，不需要重新生成 EPUB；Kobo 原有点击路径保持不变。
+
 ## 0.4.60
 
 - Kindle 的“调试信息”新增离线 EPUB 段评诊断。
