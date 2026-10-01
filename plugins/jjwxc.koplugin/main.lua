@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.59"
+local PLUGIN_VERSION = "0.4.60"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1751,6 +1751,28 @@ local function epub_paragraph_link(link)
     return scan(link,0)
 end
 
+local function diagnostic_link_text(link)
+    local out,seen={},{}
+    local function scan(value,depth,label)
+        if depth>3 or value==nil or #out>=12 then return end
+        if type(value)=="string" then
+            out[#out+1]=tostring(label or "value").."="..value:sub(1,160)
+            return
+        end
+        if type(value)~="table" or seen[value] then return end
+        seen[value]=true
+        for _,key in ipairs({"href","url","target","link","uri","dest","destination","src"}) do
+            if value[key]~=nil then scan(value[key],depth+1,key) end
+        end
+        for key,child in pairs(value) do
+            if #out>=12 then break end
+            if type(child)=="table" then scan(child,depth+1,tostring(key)) end
+        end
+    end
+    scan(link,0,"link")
+    return #out>0 and table.concat(out," | ") or tostring(link)
+end
+
 function JJ:getCurrentOfflineEpubContext()
     local doc=(self.ui and self.ui.document) or self.document
     local file=doc and doc.file
@@ -1830,10 +1852,20 @@ function JJ:removeParagraphTapHandler()
 end
 
 function JJ:installKindleEpubLinkInterceptor()
-    if not Device:isKindle() or not self.ui or not self.ui.link
-            or self._paragraph_link_on_tap_original then return end
+    if not Device:isKindle() then return end
+    if not self.ui or not self.ui.link then
+        self._kindle_epub_install_status="等待 ui.link"
+        return
+    end
+    if self._paragraph_link_on_tap_original then
+        self._kindle_epub_install_status="已安装"
+        return
+    end
     local epub_ctx=self:getCurrentOfflineEpubContext()
-    if not epub_ctx then return end
+    if not epub_ctx then
+        self._kindle_epub_install_status="未识别当前 EPUB 路径"
+        return
+    end
 
     -- WeRead uses the same ReaderLink-level interception in addition to a
     -- touch zone. Some Kindle/CREngine combinations run the native link action
@@ -1842,12 +1874,17 @@ function JJ:installKindleEpubLinkInterceptor()
     local owner=self.ui.link
     local original=owner.onTap
     local original_get=owner.getLinkFromGes
-    if type(original)~="function" or type(original_get)~="function" then return end
+    if type(original)~="function" or type(original_get)~="function" then
+        self._kindle_epub_install_status="ReaderLink 方法尚未就绪"
+        return
+    end
     local plugin=self
     local get_wrapper
     get_wrapper=function(link_self,ges)
         local link=original_get(link_self,ges)
         if not link then return nil end
+        plugin._kindle_epub_last_layer="getLinkFromGes"
+        plugin._kindle_epub_last_link=diagnostic_link_text(link)
         local chapter_id,paragraph_id=epub_paragraph_link(link)
         if not chapter_id or not paragraph_id then return link end
         local current=plugin:getCurrentOfflineEpubContext()
@@ -1878,6 +1915,8 @@ function JJ:installKindleEpubLinkInterceptor()
             return original_get(link_self,gesture)
         end)
         if ok and link then
+            plugin._kindle_epub_last_layer="onTap"
+            plugin._kindle_epub_last_link=diagnostic_link_text(link)
             local chapter_id,paragraph_id=epub_paragraph_link(link)
             if chapter_id and paragraph_id then
                 local current=plugin:getCurrentOfflineEpubContext()
@@ -1898,6 +1937,7 @@ function JJ:installKindleEpubLinkInterceptor()
     self._paragraph_link_get_wrapper=get_wrapper
     owner.getLinkFromGes=get_wrapper
     owner.onTap=wrapper
+    self._kindle_epub_install_status="已安装"
 end
 
 function JJ:installParagraphTapHandler()
@@ -1921,6 +1961,8 @@ function JJ:installParagraphTapHandler()
                 return getter(self.ui.link,ges)
             end)
             if not ok or not link then return false end
+            self._kindle_epub_last_layer="触摸区域"
+            self._kindle_epub_last_link=diagnostic_link_text(link)
             local chapter_id,epub_pid=epub_paragraph_link(link)
             if chapter_id and epub_pid then
                 local current_epub=self:getCurrentOfflineEpubContext()
@@ -2503,6 +2545,26 @@ function JJ:showDiagnostics()
         "离线 EPUB："..(Epub and "功能正常" or "模块加载失败"),
         "原生目录接管："..(self._toc_handler_owner and "当前已启用" or "仅在晋江正文启用"),
     }
+    if Device:isKindle() then
+        local doc=(self.ui and self.ui.document) or self.document
+        local file=doc and doc.file or "(无)"
+        local epub_ctx=self:getCurrentOfflineEpubContext()
+        lines[#lines+1]=""
+        lines[#lines+1]="Kindle EPUB 段评诊断："
+        lines[#lines+1]="当前文件："..tostring(file)
+        lines[#lines+1]="晋江 EPUB 上下文："..(epub_ctx and "已识别" or "未识别")
+        if epub_ctx then
+            lines[#lines+1]="novelId："..tostring(epub_ctx.novel_id)
+            lines[#lines+1]="书籍目录名："..tostring(epub_ctx.book)
+        end
+        lines[#lines+1]="ui.link："..(self.ui and self.ui.link and "存在" or "不存在")
+        lines[#lines+1]="触摸区域："..(self._paragraph_tap_installed and "已安装" or "未安装")
+        lines[#lines+1]="getLinkFromGes 包装："..(self._paragraph_link_get_original and "已安装" or "未安装")
+        lines[#lines+1]="onTap 包装："..(self._paragraph_link_on_tap_original and "已安装" or "未安装")
+        lines[#lines+1]="安装状态："..tostring(self._kindle_epub_install_status or "没有运行")
+        lines[#lines+1]="最近点击层："..tostring(self._kindle_epub_last_layer or "没有捕获")
+        lines[#lines+1]="最近链接："..tostring(self._kindle_epub_last_link or "没有捕获")
+    end
     if self.backend_error then
         lines[#lines+1]=""
         lines[#lines+1]="功能模块错误："
@@ -2626,7 +2688,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.59
+    msg([[JJWXC for KOReader v0.4.60
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2692,6 +2754,7 @@ function JJ:showHelp()
 • v0.4.57 Kindle 生成 EPUB 时将段评数字改为微读式自指向普通链接，不再声明为标准脚注；插件接管时打开本地段评，接管失败也不会跳章。Kobo 仍使用原脚注结构。
 • v0.4.58 Kindle 打开离线 EPUB 后延迟重试安装段评点击接管，兼容 KPW3 链接模块晚于 ReaderReady 初始化；并放宽本地 EPUB 路径识别。Kobo 生命周期不变。
 • v0.4.59 完整采用微读的 getLinkFromGes 识别层：Kindle 一识别到晋江段评链接就安排本地弹窗，覆盖绕过 onTap 的 KPW3 路径；仍保留自指向链接，避免事件落入翻页区。Kobo不安装该层。
+• v0.4.60 Kindle 的“调试信息”新增 EPUB 段评诊断，显示上下文、三层接管安装状态、最近点击层和 KOReader 实际链接字段；Kobo 调试内容不变。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
