@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.57"
+local PLUGIN_VERSION = "0.4.58"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1754,8 +1754,28 @@ end
 function JJ:getCurrentOfflineEpubContext()
     local doc=(self.ui and self.ui.document) or self.document
     local file=doc and doc.file
-    if not file or not tostring(file):match("离线版%.epub$") then return nil end
-    local book,novel_id=tostring(file):match("/([^/]+)_(%d+)/[^/]+_离线版%.epub$")
+    file=tostring(file or ""):gsub("\\","/")
+    if file=="" or not file:lower():match("%.epub$") then return nil end
+    local parent=file:match("/([^/]+)/[^/]+$") or ""
+    local book,novel_id=parent:match("^(.-)_(%d+)$")
+    -- A copied EPUB may sit outside its original book folder. Match its
+    -- basename against local JJWXC book directories as a fallback.
+    if (not novel_id or not book or book=="") and self.download_dir then
+        local basename=file:match("([^/]+)$")
+        local ok,iter,dir_obj=pcall(lfs.dir,self.download_dir)
+        if ok and iter then
+            for entry in iter,dir_obj do
+                local candidate_book,candidate_id=tostring(entry):match("^(.-)_(%d+)$")
+                if candidate_id and candidate_book and candidate_book~="" then
+                    local expected=safe_name(candidate_book).."_离线版.epub"
+                    if basename==expected then
+                        book,novel_id=candidate_book,candidate_id
+                        break
+                    end
+                end
+            end
+        end
+    end
     if not novel_id or not book then return nil end
     return {file=file,book=book,novel_id=tostring(novel_id)}
 end
@@ -1842,7 +1862,12 @@ function JJ:installKindleEpubLinkInterceptor()
 end
 
 function JJ:installParagraphTapHandler()
-    if not self.ui or not self.ui.link or self._paragraph_tap_installed then return end
+    if not self.ui or not self.ui.link then return end
+    if self._paragraph_tap_installed then
+        -- ReaderLink may not have existed during the first Kindle setup pass.
+        self:installKindleEpubLinkInterceptor()
+        return
+    end
     local ctx=self:getCurrentChapterContext()
     local epub_ctx=self:getCurrentOfflineEpubContext()
     if not ctx and not epub_ctx then return end
@@ -1952,6 +1977,18 @@ function JJ:onReaderReady()
     self:removePreviousChapterBoundaryHandler()
     if file and tostring(file):match("离线版%.epub$") then
         self:installParagraphTapHandler()
+        if Device:isKindle() then
+            -- On some Kindle builds ReaderLink is initialized after
+            -- ReaderReady. Retry without touching Kobo's lifecycle.
+            for _,delay in ipairs({0.2,0.8,2.0,4.0}) do
+                UIManager:scheduleIn(delay,function()
+                    local current=(self.ui and self.ui.document and self.ui.document.file) or ""
+                    if tostring(current):lower():match("%.epub$") then
+                        self:installParagraphTapHandler()
+                    end
+                end)
+            end
+        end
         return
     end
     if not file or not tostring(file):match("%.html$") then return end
@@ -2547,7 +2584,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.57
+    msg([[JJWXC for KOReader v0.4.58
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2611,6 +2648,7 @@ function JJ:showHelp()
 • v0.4.55 参考微读的链接拦截方式，仅在 Kindle 离线 EPUB 中接管段评数字，阻止 KPW3 默认书内跳转并打开本地段评弹窗；Kobo 行为不变。
 • v0.4.56 Kindle 长任务下载期间临时阻止自动休眠，暂停、停止、完成或网络错误时恢复休眠，避免唤醒后进度页面卡顿；Kobo 行为不变。
 • v0.4.57 Kindle 生成 EPUB 时将段评数字改为微读式自指向普通链接，不再声明为标准脚注；插件接管时打开本地段评，接管失败也不会跳章。Kobo 仍使用原脚注结构。
+• v0.4.58 Kindle 打开离线 EPUB 后延迟重试安装段评点击接管，兼容 KPW3 链接模块晚于 ReaderReady 初始化；并放宽本地 EPUB 路径识别。Kobo 生命周期不变。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
