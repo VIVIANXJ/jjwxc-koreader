@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.58"
+local PLUGIN_VERSION = "0.4.59"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1815,9 +1815,17 @@ function JJ:removeParagraphTapHandler()
             self._paragraph_link_owner.onTap=self._paragraph_link_on_tap_original
         end
     end
+    if self._paragraph_link_owner and self._paragraph_link_get_original then
+        if self._paragraph_link_owner.getLinkFromGes==self._paragraph_link_get_wrapper then
+            self._paragraph_link_owner.getLinkFromGes=self._paragraph_link_get_original
+        end
+    end
     self._paragraph_link_owner=nil
     self._paragraph_link_on_tap_original=nil
     self._paragraph_link_on_tap_wrapper=nil
+    self._paragraph_link_get_original=nil
+    self._paragraph_link_get_wrapper=nil
+    self._paragraph_popup_pending=nil
     self._paragraph_tap_installed=nil
 end
 
@@ -1833,13 +1841,41 @@ function JJ:installKindleEpubLinkInterceptor()
     -- here prevents that native action from jumping to another EPUB location.
     local owner=self.ui.link
     local original=owner.onTap
-    if type(original)~="function" then return end
+    local original_get=owner.getLinkFromGes
+    if type(original)~="function" or type(original_get)~="function" then return end
     local plugin=self
+    local get_wrapper
+    get_wrapper=function(link_self,ges)
+        local link=original_get(link_self,ges)
+        if not link then return nil end
+        local chapter_id,paragraph_id=epub_paragraph_link(link)
+        if not chapter_id or not paragraph_id then return link end
+        local current=plugin:getCurrentOfflineEpubContext()
+        if not current then return link end
+
+        -- ReaderLink asks getLinkFromGes before performing any navigation.
+        -- Queue our popup here so this also covers Kindle paths that bypass
+        -- ReaderLink:onTap. Keep returning the v0.4.57 self-link: if KOReader
+        -- continues processing, it stays at the same anchor rather than
+        -- falling through to the page-turn touch zone.
+        local pending=tostring(chapter_id)..":"..tostring(paragraph_id)
+        if plugin._paragraph_popup_pending~=pending then
+            plugin._paragraph_popup_pending=pending
+            UIManager:nextTick(function()
+                plugin._paragraph_popup_pending=nil
+                local still=plugin:getCurrentOfflineEpubContext()
+                if still then
+                    plugin:showOfflineEpubParagraphComments(still,chapter_id,paragraph_id)
+                end
+            end)
+        end
+        return link
+    end
     local wrapper
     wrapper=function(link_self,arg,ges)
         local gesture=ges or arg
         local ok,link=pcall(function()
-            return link_self:getLinkFromGes(gesture)
+            return original_get(link_self,gesture)
         end)
         if ok and link then
             local chapter_id,paragraph_id=epub_paragraph_link(link)
@@ -1858,6 +1894,9 @@ function JJ:installKindleEpubLinkInterceptor()
     self._paragraph_link_owner=owner
     self._paragraph_link_on_tap_original=original
     self._paragraph_link_on_tap_wrapper=wrapper
+    self._paragraph_link_get_original=original_get
+    self._paragraph_link_get_wrapper=get_wrapper
+    owner.getLinkFromGes=get_wrapper
     owner.onTap=wrapper
 end
 
@@ -1877,7 +1916,10 @@ function JJ:installParagraphTapHandler()
         screen_zone={ratio_x=0,ratio_y=0,ratio_w=1,ratio_h=1},
         overrides={"tap_link"},
         handler=function(ges)
-            local ok,link=pcall(function() return self.ui.link:getLinkFromGes(ges) end)
+            local ok,link=pcall(function()
+                local getter=self._paragraph_link_get_original or self.ui.link.getLinkFromGes
+                return getter(self.ui.link,ges)
+            end)
             if not ok or not link then return false end
             local chapter_id,epub_pid=epub_paragraph_link(link)
             if chapter_id and epub_pid then
@@ -2584,7 +2626,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.58
+    msg([[JJWXC for KOReader v0.4.59
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2649,6 +2691,7 @@ function JJ:showHelp()
 • v0.4.56 Kindle 长任务下载期间临时阻止自动休眠，暂停、停止、完成或网络错误时恢复休眠，避免唤醒后进度页面卡顿；Kobo 行为不变。
 • v0.4.57 Kindle 生成 EPUB 时将段评数字改为微读式自指向普通链接，不再声明为标准脚注；插件接管时打开本地段评，接管失败也不会跳章。Kobo 仍使用原脚注结构。
 • v0.4.58 Kindle 打开离线 EPUB 后延迟重试安装段评点击接管，兼容 KPW3 链接模块晚于 ReaderReady 初始化；并放宽本地 EPUB 路径识别。Kobo 生命周期不变。
+• v0.4.59 完整采用微读的 getLinkFromGes 识别层：Kindle 一识别到晋江段评链接就安排本地弹窗，覆盖绕过 onTap 的 KPW3 路径；仍保留自指向链接，避免事件落入翻页区。Kobo不安装该层。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
