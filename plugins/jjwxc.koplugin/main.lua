@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.55"
+local PLUGIN_VERSION = "0.4.56"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1138,6 +1138,26 @@ local function explicitly_unpurchased(err)
         or err:find("需要订阅",1,true)
 end
 
+function JJ:setDownloadStandbyGuard(task,active)
+    -- Keep Kobo behavior exactly as before. Kindle may suspend during a long
+    -- request, then replay queued UI work on wake and make the progress screen
+    -- appear frozen. WeRead uses the same two-layer standby protection.
+    if not Device:isKindle() or not task then return end
+    if active and not task.standby_guard then
+        task.standby_guard=true
+        pcall(function() UIManager:preventStandby() end)
+        pcall(function()
+            os.execute("lipc-set-prop com.lab126.powerd preventScreenSaver 1")
+        end)
+    elseif not active and task.standby_guard then
+        task.standby_guard=nil
+        pcall(function() UIManager:allowStandby() end)
+        pcall(function()
+            os.execute("lipc-set-prop com.lab126.powerd preventScreenSaver 0")
+        end)
+    end
+end
+
 function JJ:showDownloadProgress(task)
     if task.dialog then
         task.refreshing=true; UIManager:close(task.dialog); task.dialog=nil; task.refreshing=false
@@ -1164,6 +1184,7 @@ function JJ:showDownloadProgress(task)
             {text=task.paused and "继续下载" or "暂停",callback=function()
                 if task.finished then return end
                 task.paused=not task.paused
+                self:setDownloadStandbyGuard(task,not task.paused)
                 self:showDownloadProgress(task)
                 if not task.paused then UIManager:scheduleIn(0.05,function()
                     if task.kind=="comments" then self:downloadNovelCommentsStep(task)
@@ -1173,12 +1194,16 @@ function JJ:showDownloadProgress(task)
             {text="停止任务",callback=function()
                 if task.finished then return end
                 task.finished=true; task.paused=true; self.download_task=nil
+                self:setDownloadStandbyGuard(task,false)
                 task.refreshing=true; UIManager:close(dialog); task.dialog=nil
                 msg("整本下载已停止。\n\n已经完成的章节均已保留；以后重新下载会自动跳过缓存。",4)
             end},
         }},
         close_callback=function()
-            if not task.refreshing and not task.finished then task.paused=true end
+            if not task.refreshing and not task.finished then
+                task.paused=true
+                self:setDownloadStandbyGuard(task,false)
+            end
         end,
     }
     task.dialog=dialog; UIManager:show(dialog)
@@ -1191,6 +1216,7 @@ function JJ:downloadNovelStep(task)
         task.manifest.updated=os.time()
         self:saveOfflineManifest(task.novel_id,task.novel_title,task.manifest)
         local epub_path,epub_count=self:generateOfflineEpub(task.novel_id,task.novel_title,task.author,true)
+        self:setDownloadStandbyGuard(task,false)
         if task.dialog then task.refreshing=true; UIManager:close(task.dialog); task.dialog=nil end
         self.download_task=nil
         msg("整本正文下载完成。\n\n已缓存可读章节："..task.readable
@@ -1232,6 +1258,7 @@ function JJ:downloadNovelStep(task)
         end
         if not completed then
             task.running=false; task.paused=true
+            self:setDownloadStandbyGuard(task,false)
             task.current_title="已暂停，可稍后继续"
             self:showDownloadProgress(task)
             return
@@ -1292,6 +1319,7 @@ function JJ:downloadNovel(novel_id,novel_title,author)
             paused=false,running=false,
             finished=false,manifest=manifest,current_title="准备下载…"}
         self.download_task=task
+        self:setDownloadStandbyGuard(task,true)
         self:showDownloadProgress(task)
         UIManager:scheduleIn(0.05,function() self:downloadNovelStep(task) end)
     end)
@@ -1319,6 +1347,7 @@ function JJ:downloadNovelCommentsStep(task)
     if task.done>=task.total then
         task.finished=true
         local epub_path,epub_count=self:generateOfflineEpub(task.novel_id,task.novel_title,task.author,true)
+        self:setDownloadStandbyGuard(task,false)
         if task.dialog then task.refreshing=true; UIManager:close(task.dialog); task.dialog=nil end
         self.download_task=nil
         local done_text="整本段评下载完成。\n\n已缓存章节："..task.cached
@@ -1389,6 +1418,7 @@ function JJ:downloadNovelCommentsStep(task)
         end
         if not completed then
             task.running=false; task.paused=true
+            self:setDownloadStandbyGuard(task,false)
             task.current_title="已暂停，可稍后继续"
             self:showDownloadProgress(task)
             return
@@ -1403,6 +1433,7 @@ function JJ:downloadNovelCommentsStep(task)
                 -- unavailable. Keep the current index so Continue retries it.
                 advance=false
                 task.paused=true
+                self:setDownloadStandbyGuard(task,false)
                 task.current_title=title.." · 网络错误，已暂停；联网后点继续"
             else
                 task.failed=task.failed+1
@@ -1450,6 +1481,7 @@ function JJ:downloadNovelComments(novel_id,novel_title,author)
             current_title="第 1 / "..tostring(#clean).." 章："..first_title
                 .."\n正在读取本章全部段评；评论多时可能需要数分钟，可点暂停。"}
         self.download_task=task
+        self:setDownloadStandbyGuard(task,true)
         self:showDownloadProgress(task)
         UIManager:scheduleIn(0.05,function() self:downloadNovelCommentsStep(task) end)
     end)
@@ -2511,7 +2543,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.55
+    msg([[JJWXC for KOReader v0.4.56
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2573,6 +2605,7 @@ function JJ:showHelp()
 • v0.4.53 HTML 阅读可选自动预载下一章段评；使用独立后台进程，不锁住阅读界面，并可在菜单随时关闭。
 • v0.4.54 修复 Kindle 设备验证窗口内容和按钮显示不完整的问题。
 • v0.4.55 参考微读的链接拦截方式，仅在 Kindle 离线 EPUB 中接管段评数字，阻止 KPW3 默认书内跳转并打开本地段评弹窗；Kobo 行为不变。
+• v0.4.56 Kindle 长任务下载期间临时阻止自动休眠，暂停、停止、完成或网络错误时恢复休眠，避免唤醒后进度页面卡顿；Kobo 行为不变。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
