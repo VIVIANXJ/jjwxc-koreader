@@ -56,7 +56,7 @@ local function invalidate_simpleui_book_cache()
 end
 
 local JJ = WidgetContainer:extend{ name="jjwxc", is_doc_only=false }
-local PLUGIN_VERSION = "0.4.54"
+local PLUGIN_VERSION = "0.4.55"
 
 local function msg(text, timeout)
     UIManager:show(InfoMessage:new{ text=tostring(text), timeout=timeout })
@@ -1752,7 +1752,57 @@ function JJ:removeParagraphTapHandler()
             self.ui:unRegisterTouchZones({{id="jjwxc_paragraph_badge_tap",overrides={"tap_link"}}})
         end)
     end
+    if self._paragraph_link_owner and self._paragraph_link_on_tap_original then
+        -- Restore only the ReaderLink instance we wrapped. Kobo never enters
+        -- this branch, and non-JJWXC documents keep KOReader's own handler.
+        if self._paragraph_link_owner.onTap==self._paragraph_link_on_tap_wrapper then
+            self._paragraph_link_owner.onTap=self._paragraph_link_on_tap_original
+        end
+    end
+    self._paragraph_link_owner=nil
+    self._paragraph_link_on_tap_original=nil
+    self._paragraph_link_on_tap_wrapper=nil
     self._paragraph_tap_installed=nil
+end
+
+function JJ:installKindleEpubLinkInterceptor()
+    if not Device:isKindle() or not self.ui or not self.ui.link
+            or self._paragraph_link_on_tap_original then return end
+    local epub_ctx=self:getCurrentOfflineEpubContext()
+    if not epub_ctx then return end
+
+    -- WeRead uses the same ReaderLink-level interception in addition to a
+    -- touch zone. Some Kindle/CREngine combinations run the native link action
+    -- before or instead of an overriding touch zone; consuming our own anchor
+    -- here prevents that native action from jumping to another EPUB location.
+    local owner=self.ui.link
+    local original=owner.onTap
+    if type(original)~="function" then return end
+    local plugin=self
+    local wrapper
+    wrapper=function(link_self,arg,ges)
+        local gesture=ges or arg
+        local ok,link=pcall(function()
+            return link_self:getLinkFromGes(gesture)
+        end)
+        if ok and link then
+            local chapter_id,paragraph_id=epub_paragraph_link(link)
+            if chapter_id and paragraph_id then
+                local current=plugin:getCurrentOfflineEpubContext()
+                if current then
+                    UIManager:nextTick(function()
+                        plugin:showOfflineEpubParagraphComments(current,chapter_id,paragraph_id)
+                    end)
+                    return true
+                end
+            end
+        end
+        return original(link_self,arg,ges)
+    end
+    self._paragraph_link_owner=owner
+    self._paragraph_link_on_tap_original=original
+    self._paragraph_link_on_tap_wrapper=wrapper
+    owner.onTap=wrapper
 end
 
 function JJ:installParagraphTapHandler()
@@ -1785,6 +1835,9 @@ function JJ:installParagraphTapHandler()
         end,
     }})
     self._paragraph_tap_installed=true
+    -- Additional Kindle-only guard against ReaderLink following the internal
+    -- footnote anchor as ordinary EPUB navigation.
+    self:installKindleEpubLinkInterceptor()
 end
 
 -- A stable one-file-per-novel HTML intentionally contains only the chapter that
@@ -2458,7 +2511,7 @@ function JJ:refreshCurrentParagraphIndex()
 end
 
 function JJ:showHelp()
-    msg([[JJWXC for KOReader v0.4.54
+    msg([[JJWXC for KOReader v0.4.55
 
 • “晋江文学城”现在是标准 KOReader 插件菜单项，不依赖 Simple UI。
 • 主菜单优先加载；网络、段评、HTML 或 Simple UI 出错时，整个插件不会再消失。
@@ -2519,6 +2572,7 @@ function JJ:showHelp()
 • v0.4.52 插件直接接管离线 EPUB 的段评数字，从本地缓存打开与 HTML 模式相同的段评窗口，不再受 KOReader 默认脚注样式限制。
 • v0.4.53 HTML 阅读可选自动预载下一章段评；使用独立后台进程，不锁住阅读界面，并可在菜单随时关闭。
 • v0.4.54 修复 Kindle 设备验证窗口内容和按钮显示不完整的问题。
+• v0.4.55 参考微读的链接拦截方式，仅在 Kindle 离线 EPUB 中接管段评数字，阻止 KPW3 默认书内跳转并打开本地段评弹窗；Kobo 行为不变。
 • v0.4.31 支持晋江已购 VIP 章节的整包动态 DES 加密响应，并兼容未标记 encryptType 的正文二次加密。
 • 字体继续跟随 KOReader 当前字体，包括 Kobo 自定义字体。
 • 如果有异常，请打开“晋江文学城 → 调试信息”。
